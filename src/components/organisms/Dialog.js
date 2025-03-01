@@ -861,7 +861,7 @@ export function Dialog({
                     },
                   }}
                 >
-                  {resultOptions.map((result) => (
+                  {getResultOptions(formData.type).map((result) => (
                     <MenuItem
                       key={result}
                       value={result}

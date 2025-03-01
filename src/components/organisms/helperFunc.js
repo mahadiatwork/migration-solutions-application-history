@@ -1,38 +1,38 @@
 export const getResultOptions = (type) => {
   switch (type) {
     case "Meeting":
-      return "Meeting Held"; // Returning a single string instead of an array
+      return ["Meeting Held"]; // Wrap in an array
     case "To-Do":
-      return "To-do Done";
+      return ["To-do Done"];
     case "Appointment":
-      return "Appointment Completed";
+      return ["Appointment Completed"];
     case "Boardroom":
-      return "Boardroom - Completed";
+      return ["Boardroom - Completed"];
     case "Call Billing":
-      return "Call Billing - Completed";
+      return ["Call Billing - Completed"];
     case "Email Billing":
-      return "Email Billing - Completed";
+      return ["Email Billing - Completed"];
     case "Initial Consultation":
-      return "Initial Consultation - Completed";
+      return ["Initial Consultation - Completed"];
     case "Call":
-      return "Call Attempted";
+      return ["Call Attempted"];
     case "Mail":
-      return "Mail - Completed";
+      return ["Mail - Completed"];
     case "Meeting Billing":
-      return "Meeting Billing - Completed";
+      return ["Meeting Billing - Completed"];
     case "Personal Activity":
-      return "Personal Activity - Completed";
+      return ["Personal Activity - Completed"];
     case "To Do Billing":
-      return "To Do Billing - Completed";
+      return ["To Do Billing - Completed"];
     case "Vacation":
-      return "Vacation - Completed";
+      return ["Vacation - Completed"];
     case "Room 1":
     case "Room 2":
     case "Room 3":
-      return `${type} - Completed`; // Dynamic return for room cases
+      return [`${type} - Completed`]; // Wrap in an array
     case "Other":
-      return "Attachment"; // Just added it.
+      return ["Attachment"];
     default:
-      return "Note"; // Default return if no match
+      return ["Note"]; // Wrap default return in an array
   }
 };
