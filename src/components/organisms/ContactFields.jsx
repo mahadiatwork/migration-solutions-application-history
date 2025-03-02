@@ -31,9 +31,6 @@ export default function ContactField({
   selectedRowData = {}, // Default to an empty object
   currentContact, // New prop
 }) {
-
-
-  console.log("nothing else matters,", selectedRowData)
   const [contacts, setContacts] = useState([]);
   const [selectedParticipants, setSelectedParticipants] = useState([]);
   const [searchType, setSearchType] = useState("First_Name");
@@ -72,13 +69,12 @@ export default function ContactField({
         try {
           // Fetch related list data to get contact IDs
           const relatedListData = await ZOHO.CRM.API.getRelatedRecords({
-            Entity: "History1",
+            Entity: "Applications_History",
             RecordID: selectedRowData?.id,
-            RelatedList: "Contacts3",
+            RelatedList: "Contacts4",
             page: 1,
             per_page: 200,
           });
-          
 
           // Fetch full contact details for each contact ID
           const participants = await Promise.all(
@@ -86,7 +82,7 @@ export default function ContactField({
               try {
                 const contactDetails = await ZOHO.CRM.API.getRecord({
                   Entity: "Contacts",
-                  RecordID: record.Contact_Details.id,
+                  RecordID: record?.Contact?.id,
                 });
 
                 if (contactDetails.data && contactDetails.data.length > 0) {

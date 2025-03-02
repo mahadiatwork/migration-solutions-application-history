@@ -259,16 +259,16 @@ export function Table({
                         textDecoration: "underline",
                         color: isSelected ? "white" : "primary.main",
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        row.historyDetails?.id &&
-                          window.open(
-                            `https://crm.zoho.com.au/crm/org7004396182/tab/CustomModule4/${row.historyDetails.id}`,
-                            "_blank"
-                          );
-                      }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      row?.id &&
+                        window.open(
+                          `https://crm.zoho.com.au/crm/org7004396182/tab/CustomModule2/${row.id}`,
+                          "_blank"
+                        );
+                    }}
                     >
-                      {row.historyDetails?.name || row.name || "Unknown Name"}
+                      {row.name || "Unknown Name"}
                     </TableCell>
                     <TableCell size="small">
                       <Box

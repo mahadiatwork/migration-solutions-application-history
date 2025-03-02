@@ -97,7 +97,6 @@ export function Dialog({
   setOpenApplicationDialog,
   currentModuleData
 }) {
-  console.log("magic", selectedContacts,selectedRowData )
   const [historyName, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);
   const [selectedOwner, setSelectedOwner] = React.useState(
@@ -264,13 +263,13 @@ export function Dialog({
     }
 
     // Generate history name based on selected contacts
-    const updatedHistoryName = selectedParticipants
-      .map((c) => c.Full_Name)
-      .join(", ");
+    // const updatedHistoryName = selectedParticipants
+    //   .map((c) => c.Full_Name)
+    //   .join(", ");
     const finalData = {
       id: selectedRowData?.id,
-      Name: updatedHistoryName,
-      History_Details_Plain: formData.details,
+      // Name: updatedHistoryName,
+      History_Details: formData.details,
       Regarding: formData.regarding,
       Owner: selectedOwner,
       History_Result: formData.result[0] || "",
@@ -278,12 +277,16 @@ export function Dialog({
         ? formData.stakeHolder
         : {id: currentModuleData.id, name: currentModuleData.Account_Name},
       History_Type: formData.type || "",
-      Duration: formData.duration ? String(formData.duration) : null,
+      Duration_Min: formData.duration ? String(formData.duration) : null,
       Date: formData.date_time
         ? dayjs(formData.date_time).format("YYYY-MM-DDTHH:mm:ssZ")
         : null,
     };
 
+
+    console.log({selectedParticipants})
+
+    return
     try {
       if (selectedRowData) {
         await updateHistory(selectedRowData, finalData, selectedParticipants);
@@ -1151,21 +1154,7 @@ export function Dialog({
               >
                 Delete
               </Button>
-              <Button
-                onClick={handleMoveToApplication}
-                variant="outlined"
-                color="success"
-                sx={{
-                  fontSize: "9pt",
-                  marginLeft: "8px",
-                  textTransform: "none",
-                  padding: "4px 8px",
-                }}
-              >
-                Move to Application
-              </Button>
-              {/*               
-              <Button
+              {/* <Button
                 onClick={handleMoveToApplication}
                 variant="outlined"
                 color="success"
