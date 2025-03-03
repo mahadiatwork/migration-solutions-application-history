@@ -30,6 +30,7 @@ export default function ContactField({
   ZOHO,
   selectedRowData = {}, // Default to an empty object
   currentContact, // New prop
+  currentModuleData
 }) {
   const [contacts, setContacts] = useState([]);
   const [selectedParticipants, setSelectedParticipants] = useState([]);
@@ -59,15 +60,39 @@ export default function ContactField({
     },
   };
 
-  const selectedContact = selectedRowData?.historyDetails?.id
-    ? selectedRowData
-    : currentContact;
 
   useEffect(() => {
     const fetchParticipantsDetails = async () => {
-      if (selectedRowData?.id && ZOHO) {
-        try {
-          // Fetch related list data to get contact IDs
+      let participants = [];
+  
+      try {
+        if (currentModuleData?.Contact_Name?.id && ZOHO) {
+          // Fetch contact details for Contact_Name if currentModuleData exists
+          try {
+            const contactDetails = await ZOHO.CRM.API.getRecord({
+              Entity: "Contacts",
+              RecordID: currentModuleData.Contact_Name.id,
+            });
+  
+            if (contactDetails.data && contactDetails.data.length > 0) {
+              const contact = contactDetails.data[0];
+              participants.push({
+                id: contact.id,
+                First_Name: contact.First_Name || "N/A",
+                Last_Name: contact.Last_Name || "N/A",
+                Email: contact.Email || "No Email",
+                Mobile: contact.Mobile || "N/A",
+                Full_Name: `${contact.First_Name || "N/A"} ${contact.Last_Name || "N/A"}`,
+                ID_Number: contact.ID_Number || "N/A",
+              });
+            }
+          } catch (error) {
+            console.error(`Error fetching contact details for Contact_Name ID ${currentModuleData.Contact_Name.id}:`, error);
+          }
+        }
+  
+        if (selectedRowData?.id && ZOHO) {
+          // Fetch related list data to get additional contact IDs
           const relatedListData = await ZOHO.CRM.API.getRelatedRecords({
             Entity: "Applications_History",
             RecordID: selectedRowData?.id,
@@ -75,16 +100,16 @@ export default function ContactField({
             page: 1,
             per_page: 200,
           });
-
-          // Fetch full contact details for each contact ID
-          const participants = await Promise.all(
+  
+          // Fetch full contact details for each contact ID in related records
+          const relatedContacts = await Promise.all(
             relatedListData.data.map(async (record) => {
               try {
                 const contactDetails = await ZOHO.CRM.API.getRecord({
                   Entity: "Contacts",
                   RecordID: record?.Contact?.id,
                 });
-
+  
                 if (contactDetails.data && contactDetails.data.length > 0) {
                   const contact = contactDetails.data[0];
                   return {
@@ -93,36 +118,33 @@ export default function ContactField({
                     Last_Name: contact.Last_Name || "N/A",
                     Email: contact.Email || "No Email",
                     Mobile: contact.Mobile || "N/A",
-                    Full_Name: `${contact.First_Name || "N/A"} ${
-                      contact.Last_Name || "N/A"
-                    }`,
+                    Full_Name: `${contact.First_Name || "N/A"} ${contact.Last_Name || "N/A"}`,
                     ID_Number: contact.ID_Number || "N/A",
                   };
                 } else {
                   return null; // Return null for invalid records
                 }
               } catch (error) {
-                console.error(
-                  `Error fetching contact details for ID ${record.Contact_Details.id}:`,
-                  error
-                );
+                console.error(`Error fetching contact details for ID ${record?.Contact?.id}:`, error);
                 return null; // Return null for failed fetches
               }
             })
           );
-
-          // Filter out null participants and update state
-          setSelectedParticipants(
-            participants.filter((participant) => participant !== null)
-          );
-        } catch (error) {
-          console.error("Error fetching related contacts:", error);
+  
+          // Merge related contacts with primary contact (if any)
+          participants = [...participants, ...relatedContacts.filter((p) => p !== null)];
         }
+        
+        // Update state with filtered participants
+        setSelectedParticipants(participants);
+      } catch (error) {
+        console.error("Error fetching participant details:", error);
       }
     };
-
+  
     fetchParticipantsDetails();
-  }, [selectedRowData, ZOHO]);
+  }, [selectedRowData, currentModuleData, ZOHO]);
+  
 
   const handleOpen = () => {
     setFilteredContacts([]);

@@ -163,14 +163,13 @@ const App = () => {
           RecordID: recordId,
         });
 
-        console.log("currentContactData", currentModuleResponse);
+
         setCurrentModuleData(currentModuleResponse?.data?.[0] || null);
         
         if (currentContact) {
           setCurrentGlobalContact(currentContact);
         }
 
-        console.log("prostab", data)
 
         const tempData = data?.map((obj) => ({
           name: obj?.Name || "No Name",
@@ -183,9 +182,9 @@ const App = () => {
           details: obj?.History_Details || "No Details",
           icon: <DownloadIcon />,
           ownerName: obj?.Owner?.name || "Unknown Owner",
-          historyDetails: obj?.Contact_History_Info,
           stakeHolder: obj?.Stakeholder,
           // Participants:
+          currentData: currentModuleData
         }));
 
         setRelatedListData(tempData || []);
@@ -286,7 +285,6 @@ const App = () => {
     setDetails(normalizedRecord.details || "No Details");
     setSelectedContacts(newRecord.Participants);
     // Debug logs
-    console.log("New Record Normalized:", normalizedRecord);
   };
 
   const handleRightSideDataShow = (currentRegarding, currentDetails) => {
@@ -295,14 +293,13 @@ const App = () => {
   };
 
   const handleRecordUpdate = (updatedRecord) => {
-    console.log("Updated before by maddie:", updatedRecord);
 
     // Normalize updatedRecord keys to match relatedListData keys
     const normalizedRecord = {
       ...updatedRecord,
       type: updatedRecord.History_Type,
       result: updatedRecord.History_Result,
-      duration: updatedRecord.Duration,
+      duration: updatedRecord.Duration_Min,
       regarding: updatedRecord.Regarding,
       details: updatedRecord.History_Details_Plain,
       ownerName: updatedRecord?.Owner?.full_name,
@@ -326,7 +323,6 @@ const App = () => {
         return row;
       });
 
-      console.log("Updated Related List Data:", updatedData);
       return updatedData;
     });
     console.log("updatedRecord.Regarding", updatedRecord.Regarding);
@@ -401,6 +397,8 @@ const App = () => {
       // });
     }
   };
+
+
 
   return (
     <React.Fragment>
@@ -801,6 +799,7 @@ const App = () => {
         applications={applications}
         openApplicationDialog={openApplicationDialog}
         setOpenApplicationDialog={setOpenApplicationDialog}
+        currentModuleData={currentModuleData}
       />
       <Dialog
         openDialog={openCreateDialog}

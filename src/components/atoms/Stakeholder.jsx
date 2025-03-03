@@ -22,10 +22,10 @@ export default function Stakeholder({ formData, handleInputChange, ZOHO, current
       setInputValue(formData.stakeHolder.name || "");
     } else if (currentModuleData) {
       setSelectedStakeholder({
-        id: currentModuleData.id,
-        name: currentModuleData.Account_Name,
+        id: currentModuleData?.Stake_Holder?.id,
+        name: currentModuleData?.Stake_Holder?.name,
       });
-      setInputValue(currentModuleData.Account_Name || "");
+      setInputValue(currentModuleData?.Stake_Holder?.name || "");
     } else {
       setSelectedStakeholder(null);
       setInputValue("");

@@ -32,6 +32,7 @@ import { zohoApi } from "../../zohoApi";
 import ApplicationTable from "./ApplicationTable";
 import ApplicationDialog from "./ApplicationTable";
 import Stakeholder from "../atoms/Stakeholder";
+import ApplicationField from "./ApplicationField";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -103,8 +104,8 @@ export function Dialog({
     ownerList?.find(
       (owner) => owner?.full_name === selectedRowData?.ownerName
     ) ||
-      loggedInUser ||
-      null
+    loggedInUser ||
+    null
   );
   const [selectedType, setSelectedType] = React.useState("Meeting");
   const [loadedAttachmentFromRecord, setLoadedAttachmentFromRecord] =
@@ -119,7 +120,7 @@ export function Dialog({
     message: "",
     severity: "success",
   });
-  
+
   const handleSelectFile = async (e) => {
     e.preventDefault();
     if ([...e.target.files]?.length > 1) {
@@ -137,7 +138,7 @@ export function Dialog({
     let load = true;
     const getAttachment = async ({ rowData }) => {
       const { data } = await zohoApi.file.getAttachments({
-        module: "History1",
+        module: "Applications_History",
         recordId: rowData?.id,
       });
       setFormData((prev) => ({
@@ -175,7 +176,7 @@ export function Dialog({
           : dayjs(),
       });
       setSelectedContacts(
-        selectedContacts  || []
+        selectedContacts || []
       );
       setHistoryName(
         selectedRowData?.Participants?.map((p) => p.Full_Name).join(", ") || ""
@@ -185,8 +186,8 @@ export function Dialog({
         ownerList?.find(
           (owner) => owner?.full_name === selectedRowData?.ownerName
         ) ||
-          loggedInUser ||
-          null
+        loggedInUser ||
+        null
       );
 
       setHistoryContacts(selectedContacts || []);
@@ -201,20 +202,18 @@ export function Dialog({
       if (selectedRowData?.id) {
         try {
           const data = await ZOHO.CRM.API.getRelatedRecords({
-            Entity: "History1",
+            Entity: "Applications_History",
             RecordID: selectedRowData?.id,
-            RelatedList: "Contacts3",
+            RelatedList: "Contacts4",
             page: 1,
             per_page: 200,
           });
 
           const contactDetailsArray = data.data.map((record) => ({
-            Full_Name: record.Contact_Details.name,
-            id: record.Contact_Details.id,
+            Full_Name: record.Contact.name,
+            id: record.Contact.id,
           }));
 
-
-          console.log({contactDetailsArray})
           setHistoryContacts(contactDetailsArray);
           setSelectedContacts(contactDetailsArray);
           setFormData((prevFormData) => ({
@@ -248,10 +247,8 @@ export function Dialog({
   };
 
   const handleSubmit = async (event) => {
-
     event.preventDefault();
 
-  
     let selectedParticipants = [];
 
     if (formData.Participants) {
@@ -259,37 +256,41 @@ export function Dialog({
     }
 
     if (selectedParticipants.length === 0) {
-      selectedParticipants = [currentContact];
+      selectedParticipants = selectedContacts;
+    }
+
+    if (selectedParticipants.length === 0) {
+      selectedParticipants = [{
+        id: currentModuleData?.Contact_Name?.id,
+        Full_Name: currentModuleData?.Contact_Name?.name
+      }];
     }
 
     // Generate history name based on selected contacts
-    // const updatedHistoryName = selectedParticipants
-    //   .map((c) => c.Full_Name)
-    //   .join(", ");
+    const updatedHistoryName = selectedParticipants
+      .map((c) => c.Full_Name)
+      .join(", ");
     const finalData = {
-      id: selectedRowData?.id,
-      // Name: updatedHistoryName,
+      Name: currentModuleData?.Name + " - " + updatedHistoryName,
       History_Details: formData.details,
       Regarding: formData.regarding,
       Owner: selectedOwner,
-      History_Result: formData.result[0] || "",
+      History_Result: formData.result.length > 0 ? formData.result[0] : formData.result || "",
       Stakeholder: formData.stakeHolder
         ? formData.stakeHolder
-        : {id: currentModuleData.id, name: currentModuleData.Account_Name},
+        : { id: currentModuleData?.Stake_Holder?.id, name: currentModuleData?.Stake_Holder?.name },
       History_Type: formData.type || "",
       Duration_Min: formData.duration ? String(formData.duration) : null,
       Date: formData.date_time
         ? dayjs(formData.date_time).format("YYYY-MM-DDTHH:mm:ssZ")
         : null,
+      Application: { id: currentModuleData?.id }
     };
 
 
-    console.log({selectedParticipants})
-
-    return
     try {
       if (selectedRowData) {
-        await updateHistory(selectedRowData, finalData, selectedParticipants);
+        await updateHistory(selectedRowData, finalData, selectedParticipants, currentModuleData);
       } else {
         await createHistory(finalData, selectedParticipants);
       }
@@ -307,53 +308,64 @@ export function Dialog({
 
   const createHistory = async (finalData, selectedParticipants) => {
     try {
+      // Create the main Applications_History record
       const createConfig = {
-        Entity: "History1",
+        Entity: "Applications_History",
         APIData: {
           ...finalData,
         },
         Trigger: ["workflow"],
       };
 
-      // Create the History1 record
       const createResponse = await ZOHO.CRM.API.insertRecord(createConfig);
       if (createResponse?.data[0]?.code === "SUCCESS") {
         const historyId = createResponse.data[0].details.id;
+
+        // Upload attachment if available
         if (formData?.attachment) {
           const fileResp = await zohoApi.file.uploadAttachment({
-            module: "History1",
+            module: "Applications_History",
             recordId: historyId,
             data: formData?.attachment,
           });
           console.log({ fileResp });
         }
 
-        let contactRecordIds = [];
+        let createdRecords = [];
 
-        // Create History_X_Contacts records for each contact
+
+
+        // Create Applications_History records for each contact
         for (const contact of selectedParticipants) {
           try {
-            const contactResponse = await ZOHO.CRM.API.insertRecord({
-              Entity: "History_X_Contacts",
+            console.log({
+              Entity: "Application_Hstory",
               APIData: {
-                Contact_History_Info: { id: historyId },
-                Contact_Details: { id: contact.id },
-                Stakeholder: finalData?.Stakeholder, // Add this field
+                Application_Hstory: { id: historyId },
+                Contact: { id: contact.id } // Associate with contact
+              },
+              Trigger: ["workflow"],
+            })
+
+            const contactHistoryResponse = await ZOHO.CRM.API.insertRecord({
+              Entity: "Application_Hstory",
+              APIData: {
+                Application_Hstory: { id: historyId },
+                Contact: { id: contact.id } // Associate with contact
               },
               Trigger: ["workflow"],
             });
 
-            // Collect the ID from the insertion response
-            if (contactResponse?.data[0]?.code === "SUCCESS") {
-              contactRecordIds.push(contactResponse.data[0].details.id);
+            if (contactHistoryResponse?.data[0]?.code === "SUCCESS") {
+              createdRecords.push(historyId);
             } else {
               console.warn(
-                `Failed to insert History_X_Contacts record for contact ID ${contact.id}`
+                `Failed to insert Applications_History record for contact ID ${contact.id}`
               );
             }
           } catch (error) {
             console.error(
-              `Error inserting History_X_Contacts record for contact ID ${contact.id}:`,
+              `Error inserting Applications_History record for contact ID ${contact.id}:`,
               error
             );
           }
@@ -365,20 +377,20 @@ export function Dialog({
           severity: "success",
         });
 
-        // Notify parent about the created record
+        // Notify parent about the created records
         const updatedRecord = {
-          id: contactRecordIds[0] || null, // Set the first inserted History_X_Contacts ID (or null if none succeeded)
+          id: createdRecords[0] || null, // First inserted record ID (or null if none succeeded)
           ...finalData,
           Participants: selectedParticipants,
           historyDetails: {
             name: selectedParticipants.map((c) => c.Full_Name).join(", "),
-            id: historyId, // Add the History1 record ID to historyDetails
+            id: historyId, // Add the original history record ID
           },
         };
 
         if (onRecordAdded) onRecordAdded(updatedRecord);
       } else {
-        throw new Error("Failed to create History1 record.");
+        throw new Error("Failed to create Applications_History record.");
       }
     } catch (error) {
       console.error("Error creating history:", error);
@@ -386,24 +398,31 @@ export function Dialog({
     }
   };
 
+
   const updateHistory = async (
     selectedRowData,
     finalData,
-    selectedParticipants
+    selectedParticipants,
+    currentModuleData
   ) => {
     try {
-      // 76775000000272001
-      const adminUserId = "76775000000272001";
-      const otherUserId = "76775000000809089";
+
+
+      const updatedHistoryName = selectedParticipants
+        .map((c) => c.Full_Name)
+        .join(", ");
+
       const updateConfig = {
-        Entity: "History1",
-        RecordID: finalData?.id,
+        Entity: "Applications_History",
+        RecordID: selectedRowData?.id,
         APIData: {
-          id: finalData?.id,
+          id: selectedRowData?.id,
+          Name: currentModuleData?.Name + " - " + updatedHistoryName,
           ...finalData
         },
         Trigger: ["workflow"],
       };
+
 
 
       const updateResponse = await ZOHO.CRM.API.updateRecord(updateConfig);
@@ -413,23 +432,23 @@ export function Dialog({
 
         // Delete attachment
         const deleteFileResp = await zohoApi.file.deleteAttachment({
-          module: "History1",
+          module: "Applications_History",
           recordId: historyId,
           attachment_id: loadedAttachmentFromRecord?.[0]?.id,
         });
 
         // Add new attachment
         const uploadFileResp = await zohoApi.file.uploadAttachment({
-          module: "History1",
+          module: "Applications_History",
           recordId: historyId,
           data: formData?.attachment,
         });
 
-        // Fetch existing History_X_Contacts records
+        // Fetch existing Applications_History records for each contact
         const relatedRecordsResponse = await ZOHO.CRM.API.getRelatedRecords({
-          Entity: "History1",
+          Entity: "Applications_History",
           RecordID: historyId,
-          RelatedList: "Contacts3",
+          RelatedList: "Contacts4",
         });
 
         const existingContacts = relatedRecordsResponse?.data || [];
@@ -454,7 +473,7 @@ export function Dialog({
 
           if (recordToDelete?.id) {
             await ZOHO.CRM.API.deleteRecord({
-              Entity: "History_X_Contacts",
+              Entity: "Applications_History",
               RecordID: recordToDelete.id,
             });
           }
@@ -464,9 +483,9 @@ export function Dialog({
         for (const contact of toAddContacts) {
           try {
             await ZOHO.CRM.API.insertRecord({
-              Entity: "History_X_Contacts",
+              Entity: "Applications_History",
               APIData: {
-                Contact_History_Info: { id: historyId },
+                ...finalData,
                 Contact_Details: { id: contact.id },
                 Stakeholder: finalData?.Stakeholder
               },
@@ -482,7 +501,7 @@ export function Dialog({
 
         // Notify parent about the updated record
         const updatedRecord = {
-          id: selectedRowData.id || null, // Use the ID from the first related record
+          id: selectedRowData.id || null,
           ...finalData,
           Participants: selectedParticipants,
           Stakeholder: finalData?.Stakeholder,
@@ -508,6 +527,7 @@ export function Dialog({
     }
   };
 
+
   const handleDelete = async () => {
     if (!selectedRowData) return; // No record selected
 
@@ -515,15 +535,16 @@ export function Dialog({
       // Delete related records first
       if (selectedRowData?.id) {
         const relatedRecordsResponse = await ZOHO.CRM.API.getRelatedRecords({
-          Entity: "History1",
+          Entity: "Applications_History",
           RecordID: selectedRowData?.id,
-          RelatedList: "Contacts3",
+          RelatedList: "Contacts4",
         });
 
         const relatedRecords = relatedRecordsResponse?.data || [];
+
         const deletePromises = relatedRecords.map((record) =>
           ZOHO.CRM.API.deleteRecord({
-            Entity: "History_X_Contacts",
+            Entity: "Application_Hstory",
             RecordID: record.id,
           })
         );
@@ -531,9 +552,11 @@ export function Dialog({
         await Promise.all(deletePromises);
       }
 
+
+
       // Delete the main record
       const response = await ZOHO.CRM.API.deleteRecord({
-        Entity: "History1",
+        Entity: "Applications_History",
         RecordID: selectedRowData?.id,
       });
 
@@ -884,6 +907,7 @@ export function Dialog({
             selectedRowData={selectedRowData}
             currentContact={currentContact}
             selectedContacts={historyContacts}
+            currentModuleData={currentModuleData}
           />
 
           <Stakeholder
