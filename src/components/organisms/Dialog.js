@@ -270,6 +270,8 @@ export function Dialog({
     const updatedHistoryName = selectedParticipants
       .map((c) => c.Full_Name)
       .join(", ");
+
+
     const finalData = {
       Name: currentModuleData?.Name + " - " + updatedHistoryName,
       History_Details: formData.details,
@@ -308,86 +310,71 @@ export function Dialog({
 
   const createHistory = async (finalData, selectedParticipants) => {
     try {
-      // Create the main Applications_History record
+      // Step 1: Create the main Applications_History record
       const createConfig = {
         Entity: "Applications_History",
-        APIData: {
-          ...finalData,
-        },
+        APIData: { ...finalData },
         Trigger: ["workflow"],
       };
-
+  
       const createResponse = await ZOHO.CRM.API.insertRecord(createConfig);
+
       if (createResponse?.data[0]?.code === "SUCCESS") {
         const historyId = createResponse.data[0].details.id;
-
-        // Upload attachment if available
+        let createdRecords = [];
+  
+        // Step 2: Upload attachment in parallel if it exists
         if (formData?.attachment) {
-          const fileResp = await zohoApi.file.uploadAttachment({
+          zohoApi.file.uploadAttachment({
             module: "Applications_History",
             recordId: historyId,
             data: formData?.attachment,
-          });
-          console.log({ fileResp });
+          }).then((fileResp) => console.log({ fileResp })) // Handle asynchronously
+          .catch((error) => console.error("Error uploading attachment:", error));
         }
-
-        let createdRecords = [];
-
-
-
-        // Create Applications_History records for each contact
-        for (const contact of selectedParticipants) {
-          try {
-            console.log({
-              Entity: "Application_Hstory",
-              APIData: {
-                Application_Hstory: { id: historyId },
-                Contact: { id: contact.id } // Associate with contact
-              },
-              Trigger: ["workflow"],
-            })
-
-            const contactHistoryResponse = await ZOHO.CRM.API.insertRecord({
-              Entity: "Application_Hstory",
-              APIData: {
-                Application_Hstory: { id: historyId },
-                Contact: { id: contact.id } // Associate with contact
-              },
-              Trigger: ["workflow"],
-            });
-
-            if (contactHistoryResponse?.data[0]?.code === "SUCCESS") {
-              createdRecords.push(historyId);
-            } else {
-              console.warn(
-                `Failed to insert Applications_History record for contact ID ${contact.id}`
-              );
-            }
-          } catch (error) {
-            console.error(
-              `Error inserting Applications_History record for contact ID ${contact.id}:`,
-              error
-            );
-          }
-        }
-
+  
+        // // Step 3: Prepare contact history insert requests
+        // const contactRequests = selectedParticipants.map((contact) => ({
+        //   Entity: "Application_Hstory",
+        //   APIData: {
+        //     Application_Hstory: { id: historyId },
+        //     Contact: { id: contact.id },
+        //   },
+        //   Trigger: ["workflow"],
+        // }));
+  
+        // // Step 4: Execute all contact history insertions in parallel
+        // const contactHistoryResponses = await Promise.all(
+        //   contactRequests.map((config) => ZOHO.CRM.API.insertRecord(config))
+        // );
+  
+        // contactHistoryResponses.forEach((response, index) => {
+        //   if (response?.data[0]?.code === "SUCCESS") {
+        //     createdRecords.push(selectedParticipants[index].id);
+        //   } else {
+        //     console.warn(
+        //       `Failed to insert Applications_History record for contact ID ${selectedParticipants[index].id}`
+        //     );
+        //   }
+        // });
+  
+        // Step 5: Set success message & notify parent
         setSnackbar({
           open: true,
           message: "Record created successfully!",
           severity: "success",
         });
-
-        // Notify parent about the created records
+  
         const updatedRecord = {
-          id: createdRecords[0] || null, // First inserted record ID (or null if none succeeded)
+          id: createdRecords[0] || null,
           ...finalData,
           Participants: selectedParticipants,
           historyDetails: {
             name: selectedParticipants.map((c) => c.Full_Name).join(", "),
-            id: historyId, // Add the original history record ID
+            id: historyId,
           },
         };
-
+  
         if (onRecordAdded) onRecordAdded(updatedRecord);
       } else {
         throw new Error("Failed to create Applications_History record.");
@@ -397,6 +384,7 @@ export function Dialog({
       throw error;
     }
   };
+  
 
 
   const updateHistory = async (
