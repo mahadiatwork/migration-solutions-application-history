@@ -423,8 +423,6 @@ export function Dialog({
         Trigger: ["workflow"],
       };
 
-
-
       const updateResponse = await ZOHO.CRM.API.updateRecord(updateConfig);
 
       if (updateResponse?.data[0]?.code === "SUCCESS") {
@@ -480,24 +478,24 @@ export function Dialog({
         }
 
         // Add new records for newly selected contacts
-        for (const contact of toAddContacts) {
-          try {
-            await ZOHO.CRM.API.insertRecord({
-              Entity: "Applications_History",
-              APIData: {
-                ...finalData,
-                Contact_Details: { id: contact.id },
-                Stakeholder: finalData?.Stakeholder
-              },
-              Trigger: ["workflow"],
-            });
-          } catch (error) {
-            console.error(
-              `Error inserting record for contact ID ${contact.id}:`,
-              error
-            );
-          }
-        }
+        // for (const contact of toAddContacts) {
+        //   try {
+        //     await ZOHO.CRM.API.insertRecord({
+        //       Entity: "Applications_History",
+        //       APIData: {
+        //         ...finalData,
+        //         Contact_Details: { id: contact.id },
+        //         Stakeholder: finalData?.Stakeholder
+        //       },
+        //       Trigger: ["workflow"],
+        //     });
+        //   } catch (error) {
+        //     console.error(
+        //       `Error inserting record for contact ID ${contact.id}:`,
+        //       error
+        //     );
+        //   }
+        // }
 
         // Notify parent about the updated record
         const updatedRecord = {

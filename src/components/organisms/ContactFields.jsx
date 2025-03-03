@@ -66,8 +66,8 @@ export default function ContactField({
       let participants = [];
   
       try {
+        // Fetch the primary contact if currentModuleData exists
         if (currentModuleData?.Contact_Name?.id && ZOHO) {
-          // Fetch contact details for Contact_Name if currentModuleData exists
           try {
             const contactDetails = await ZOHO.CRM.API.getRecord({
               Entity: "Contacts",
@@ -76,7 +76,7 @@ export default function ContactField({
   
             if (contactDetails.data && contactDetails.data.length > 0) {
               const contact = contactDetails.data[0];
-              participants.push({
+              const formattedContact = {
                 id: contact.id,
                 First_Name: contact.First_Name || "N/A",
                 Last_Name: contact.Last_Name || "N/A",
@@ -84,15 +84,17 @@ export default function ContactField({
                 Mobile: contact.Mobile || "N/A",
                 Full_Name: `${contact.First_Name || "N/A"} ${contact.Last_Name || "N/A"}`,
                 ID_Number: contact.ID_Number || "N/A",
-              });
+              };
+  
+              participants.push(formattedContact);
             }
           } catch (error) {
             console.error(`Error fetching contact details for Contact_Name ID ${currentModuleData.Contact_Name.id}:`, error);
           }
         }
   
+        // Fetch related contacts if selectedRowData exists
         if (selectedRowData?.id && ZOHO) {
-          // Fetch related list data to get additional contact IDs
           const relatedListData = await ZOHO.CRM.API.getRelatedRecords({
             Entity: "Applications_History",
             RecordID: selectedRowData?.id,
@@ -101,7 +103,7 @@ export default function ContactField({
             per_page: 200,
           });
   
-          // Fetch full contact details for each contact ID in related records
+          // Fetch each related contact
           const relatedContacts = await Promise.all(
             relatedListData.data.map(async (record) => {
               try {
@@ -121,22 +123,23 @@ export default function ContactField({
                     Full_Name: `${contact.First_Name || "N/A"} ${contact.Last_Name || "N/A"}`,
                     ID_Number: contact.ID_Number || "N/A",
                   };
-                } else {
-                  return null; // Return null for invalid records
                 }
+                return null;
               } catch (error) {
                 console.error(`Error fetching contact details for ID ${record?.Contact?.id}:`, error);
-                return null; // Return null for failed fetches
+                return null;
               }
             })
           );
   
-          // Merge related contacts with primary contact (if any)
           participants = [...participants, ...relatedContacts.filter((p) => p !== null)];
         }
-        
-        // Update state with filtered participants
-        setSelectedParticipants(participants);
+  
+        // Ensure no duplicate contacts exist
+        const uniqueParticipants = [...new Map(participants.map((item) => [item.id, item])).values()];
+  
+        // Update state
+        setSelectedParticipants(uniqueParticipants);
       } catch (error) {
         console.error("Error fetching participant details:", error);
       }
@@ -144,6 +147,7 @@ export default function ContactField({
   
     fetchParticipantsDetails();
   }, [selectedRowData, currentModuleData, ZOHO]);
+  
   
 
   const handleOpen = () => {
@@ -191,27 +195,28 @@ export default function ContactField({
   };
 
   const toggleContactSelection = (contact) => {
-    setSelectedParticipants((prev) =>
-      prev.some((c) => c.id === contact.id)
-        ? prev.filter((c) => c.id !== contact.id)
-        : [...prev, contact]
-    );
+    setSelectedParticipants((prev) => {
+      // Check if the contact is already in the list
+      if (prev.some((c) => c.id === contact.id)) {
+        return prev.filter((c) => c.id !== contact.id);
+      }
+      return [...prev, contact];
+    });
   };
-
+  
   const handleOk = () => {
     const updatedParticipants = selectedParticipants.map((participant) => ({
-      Full_Name:
-        participant.Full_Name ||
-        `${participant.First_Name} ${participant.Last_Name}`,
+      Full_Name: participant.Full_Name || `${participant.First_Name} ${participant.Last_Name}`,
       Email: participant.Email,
       participant: participant.id,
       type: "contact",
       id: participant.id,
     }));
-
+  
     handleInputChange("Participants", updatedParticipants);
     setIsModalOpen(false);
   };
+  
 
   return (
     <Box>

@@ -301,7 +301,7 @@ const App = () => {
       result: updatedRecord.History_Result,
       duration: updatedRecord.Duration_Min,
       regarding: updatedRecord.Regarding,
-      details: updatedRecord.History_Details_Plain,
+      details: updatedRecord.History_Details,
       ownerName: updatedRecord?.Owner?.full_name,
       date_time: updatedRecord?.Date, // Ensure date is consistent
       stakeHolder: updatedRecord?.Stakeholder
