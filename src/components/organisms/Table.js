@@ -193,9 +193,6 @@ export function Table({
     [order, rows, orderBy]
   );
 
-  React.useEffect(() => {
-    console.log("Table rows updated:", rows); // Debugging rows
-  }, [rows]);
 
   return (
     <Paper sx={{ height: "25.5rem", overflowY: "auto" }}>

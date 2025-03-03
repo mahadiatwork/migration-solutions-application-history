@@ -96,7 +96,9 @@ export function Dialog({
   applications,
   openApplicationDialog,
   setOpenApplicationDialog,
-  currentModuleData
+  currentModuleData,
+  selectedParticipants,
+  setSelectedParticipants
 }) {
   const [historyName, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);
@@ -161,8 +163,6 @@ export function Dialog({
   // Reinitialize dialog state when `openDialog` or `obj` changes
   React.useEffect(() => {
     if (openDialog) {
-
-      console.log("same", selectedContacts)
       setFormData({
         Participants: selectedRowData?.Participants || [],
         result: selectedRowData?.result || "Meeting Held",
@@ -277,9 +277,11 @@ export function Dialog({
       History_Details: formData.details,
       Regarding: formData.regarding,
       Owner: selectedOwner,
-      History_Result: formData.result.length > 0 ? formData.result[0] : formData.result || "",
+      History_Result: Array.isArray(formData.result) && formData.result.length > 0
+        ? formData.result[0]
+        : formData.result,
       Stakeholder: formData.stakeHolder
-        ? formData.stakeHolder
+        ? { id: formData.stakeHolder?.id, name: formData.stakeHolder?.name }
         : { id: currentModuleData?.Stake_Holder?.id, name: currentModuleData?.Stake_Holder?.name },
       History_Type: formData.type || "",
       Duration_Min: formData.duration ? String(formData.duration) : null,
@@ -288,7 +290,6 @@ export function Dialog({
         : null,
       Application: { id: currentModuleData?.id }
     };
-
 
     try {
       if (selectedRowData) {
@@ -318,45 +319,49 @@ export function Dialog({
       };
   
       const createResponse = await ZOHO.CRM.API.insertRecord(createConfig);
-
+  
       if (createResponse?.data[0]?.code === "SUCCESS") {
         const historyId = createResponse.data[0].details.id;
         let createdRecords = [];
   
         // Step 2: Upload attachment in parallel if it exists
         if (formData?.attachment) {
-          zohoApi.file.uploadAttachment({
-            module: "Applications_History",
-            recordId: historyId,
-            data: formData?.attachment,
-          }).then((fileResp) => console.log({ fileResp })) // Handle asynchronously
-          .catch((error) => console.error("Error uploading attachment:", error));
+          try {
+            const fileResp = await zohoApi.file.uploadAttachment({
+              module: "Applications_History",
+              recordId: historyId,
+              data: formData?.attachment,
+            });
+            console.log({ fileResp });
+          } catch (error) {
+            console.error("Error uploading attachment:", error);
+          }
         }
   
-        // // Step 3: Prepare contact history insert requests
-        // const contactRequests = selectedParticipants.map((contact) => ({
-        //   Entity: "Application_Hstory",
-        //   APIData: {
-        //     Application_Hstory: { id: historyId },
-        //     Contact: { id: contact.id },
-        //   },
-        //   Trigger: ["workflow"],
-        // }));
+        // Step 3: Prepare contact history insert requests
+        const contactRequests = selectedParticipants.map((contact) => ({
+          Entity: "Applications_History", // Correct entity name
+          APIData: {
+            Application_History: { id: historyId }, // Corrected entity reference
+            Contact: { id: contact.id },
+          },
+          Trigger: ["workflow"],
+        }));
   
-        // // Step 4: Execute all contact history insertions in parallel
-        // const contactHistoryResponses = await Promise.all(
-        //   contactRequests.map((config) => ZOHO.CRM.API.insertRecord(config))
-        // );
+        // Step 4: Execute all contact history insertions in parallel
+        const contactHistoryResponses = await Promise.all(
+          contactRequests.map((config) => ZOHO.CRM.API.insertRecord(config))
+        );
   
-        // contactHistoryResponses.forEach((response, index) => {
-        //   if (response?.data[0]?.code === "SUCCESS") {
-        //     createdRecords.push(selectedParticipants[index].id);
-        //   } else {
-        //     console.warn(
-        //       `Failed to insert Applications_History record for contact ID ${selectedParticipants[index].id}`
-        //     );
-        //   }
-        // });
+        contactHistoryResponses.forEach((response, index) => {
+          if (response?.data[0]?.code === "SUCCESS") {
+            createdRecords.push(selectedParticipants[index].id);
+          } else {
+            console.warn(
+              `Failed to insert Applications_History record for contact ID ${selectedParticipants[index].id}`
+            );
+          }
+        });
   
         // Step 5: Set success message & notify parent
         setSnackbar({
@@ -366,13 +371,10 @@ export function Dialog({
         });
   
         const updatedRecord = {
-          id: createdRecords[0] || null,
+          id: selectedRowData?.id || null, // Ensure selectedRowData is passed or defined
           ...finalData,
           Participants: selectedParticipants,
-          historyDetails: {
-            name: selectedParticipants.map((c) => c.Full_Name).join(", "),
-            id: historyId,
-          },
+          stakeHolder: finalData?.Stakeholder,
         };
   
         if (onRecordAdded) onRecordAdded(updatedRecord);
@@ -381,6 +383,11 @@ export function Dialog({
       }
     } catch (error) {
       console.error("Error creating history:", error);
+      setSnackbar({
+        open: true,
+        message: `Error: ${error.message}`,
+        severity: "error",
+      });
       throw error;
     }
   };
@@ -394,8 +401,6 @@ export function Dialog({
     currentModuleData
   ) => {
     try {
-
-
       const updatedHistoryName = selectedParticipants
         .map((c) => c.Full_Name)
         .join(", ");
@@ -413,24 +418,12 @@ export function Dialog({
 
       const updateResponse = await ZOHO.CRM.API.updateRecord(updateConfig);
 
+      console.log({updateResponse})
+
       if (updateResponse?.data[0]?.code === "SUCCESS") {
         const historyId = selectedRowData?.id;
 
-        // Delete attachment
-        const deleteFileResp = await zohoApi.file.deleteAttachment({
-          module: "Applications_History",
-          recordId: historyId,
-          attachment_id: loadedAttachmentFromRecord?.[0]?.id,
-        });
-
-        // Add new attachment
-        const uploadFileResp = await zohoApi.file.uploadAttachment({
-          module: "Applications_History",
-          recordId: historyId,
-          data: formData?.attachment,
-        });
-
-        // Fetch existing Applications_History records for each contact
+        // Fetch related contacts from Applications_History
         const relatedRecordsResponse = await ZOHO.CRM.API.getRelatedRecords({
           Entity: "Applications_History",
           RecordID: historyId,
@@ -442,62 +435,65 @@ export function Dialog({
           (contact) => contact.Contact_Details?.id
         );
 
-        // Find contacts to add and to delete
+        // Find which contacts need to be deleted
         const selectedContactIds = selectedParticipants.map((c) => c.id);
         const toDeleteContactIds = existingContactIds.filter(
           (id) => !selectedContactIds.includes(id)
         );
-        const toAddContacts = selectedParticipants.filter(
-          (contact) => !existingContactIds.includes(contact.id)
-        );
 
-        // Delete records for removed contacts
+
+        // Delete removed contacts
         for (const id of toDeleteContactIds) {
           const recordToDelete = existingContacts.find(
             (contact) => contact.Contact_Details?.id === id
           );
 
           if (recordToDelete?.id) {
+            console.log("Deleting record:", recordToDelete.id);
+
             await ZOHO.CRM.API.deleteRecord({
-              Entity: "Applications_History",
+              Entity: "Application_Hstory", // ✅ Ensure this is correct
               RecordID: recordToDelete.id,
             });
           }
         }
 
-        // Add new records for newly selected contacts
-        // for (const contact of toAddContacts) {
-        //   try {
-        //     await ZOHO.CRM.API.insertRecord({
-        //       Entity: "Applications_History",
-        //       APIData: {
-        //         ...finalData,
-        //         Contact_Details: { id: contact.id },
-        //         Stakeholder: finalData?.Stakeholder
-        //       },
-        //       Trigger: ["workflow"],
-        //     });
-        //   } catch (error) {
-        //     console.error(
-        //       `Error inserting record for contact ID ${contact.id}:`,
-        //       error
-        //     );
-        //   }
-        // }
+        // Find new contacts that need to be added
+        const toAddContacts = selectedParticipants.filter(
+          (contact) => !existingContactIds.includes(contact.id)
+        );
 
-        // Notify parent about the updated record
+        // Add new contacts
+        for (const contact of toAddContacts) {
+          try {
+            console.log("Adding contact:", contact.id);
+
+            await ZOHO.CRM.API.insertRecord({
+              Entity: "Application_Hstory", // ✅ Ensure this is correct
+              APIData: {
+                Contact: { id: contact.id },
+                Application_Hstory: { id: historyId },
+              },
+              Trigger: ["workflow"],
+            });
+          } catch (error) {
+            console.error(`Error inserting record for contact ID ${contact.id}:`, error);
+          }
+        }
+
         const updatedRecord = {
           id: selectedRowData.id || null,
           ...finalData,
           Participants: selectedParticipants,
-          Stakeholder: finalData?.Stakeholder,
-          historyDetails: {
-            ...selectedRowData?.historyDetails,
-            name: selectedParticipants.map((c) => c.Full_Name).join(", "),
-          },
+          stakeHolder: finalData?.Stakeholder,
         };
 
         if (onRecordAdded) onRecordAdded(updatedRecord);
+
+        // ✅ Ensure state is updated properly
+        setSelectedParticipants((prev) =>
+          prev.filter((p) => selectedContactIds.includes(p.id))
+        );
 
         setSnackbar({
           open: true,
@@ -894,6 +890,8 @@ export function Dialog({
             currentContact={currentContact}
             selectedContacts={historyContacts}
             currentModuleData={currentModuleData}
+            selectedParticipants={selectedParticipants}
+            setSelectedParticipants={setSelectedParticipants}
           />
 
           <Stakeholder

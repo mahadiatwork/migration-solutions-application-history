@@ -87,6 +87,8 @@ const App = () => {
   const [details, setDetails] = React.useState("");
   const [selectedContacts, setSelectedContacts] = React.useState([]);
   const [currentModuleData, setCurrentModuleData] = React.useState(null);
+  const [selectedParticipants, setSelectedParticipants] = React.useState([]);
+
 
   const [isCustomRangeDialogOpen, setIsCustomRangeDialogOpen] =
     React.useState(false);
@@ -104,7 +106,6 @@ const App = () => {
   };
 
   const handleClickOpenEditDialog = (rowData) => {
-    console.log({ rowData });
 
     setSelectedRowData(rowData); // Set the selected row data
     // setRegarding(rowData?.regarding || ""); // Initialize regarding data
@@ -253,22 +254,14 @@ const App = () => {
 
     const normalizedRecord = {
       id: newRecord.id,
-      name: newRecord.Participants
-        ? newRecord.Participants.map((c) => c.Full_Name).join(", ")
-        : newRecord.name || "Unknown Name",
+      name: newRecord.name || "Unknown Name",
       date_time: newRecord.Date || dayjs().format(), // Ensure date is consistent
       type: newRecord.History_Type || "Unknown Type",
       result: newRecord.History_Result || "No Result",
       duration: newRecord.Duration || "N/A",
       regarding: newRecord.Regarding || "No Regarding",
-      details: newRecord.History_Details_Plain || "No Details",
+      details: newRecord.History_Details || "No Details",
       ownerName: newRecord.Owner?.full_name || "Unknown Owner",
-      historyDetails: {
-        ...newRecord.historyDetails,
-        name: newRecord.Participants
-          ? newRecord.Participants.map((c) => c.Full_Name).join(", ")
-          : newRecord.historyDetails?.name || "Unknown",
-      },
       stakeHolder: newRecord.Stakeholder || null,
       Participants: participantsArray,
     };
@@ -800,6 +793,8 @@ const App = () => {
         openApplicationDialog={openApplicationDialog}
         setOpenApplicationDialog={setOpenApplicationDialog}
         currentModuleData={currentModuleData}
+        selectedParticipants={selectedParticipants}
+        setSelectedParticipants={setSelectedParticipants}
       />
       <Dialog
         openDialog={openCreateDialog}
@@ -814,6 +809,8 @@ const App = () => {
         setSelectedContacts={setSelectedContacts}
         buttonText="Save"
         currentModuleData={currentModuleData}
+        selectedParticipants={selectedParticipants}
+        setSelectedParticipants={setSelectedParticipants}
       />
       {isCustomRangeDialogOpen && (
         <MUIDialog

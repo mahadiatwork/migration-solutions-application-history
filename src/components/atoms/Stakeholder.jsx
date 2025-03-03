@@ -1,86 +1,99 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Autocomplete, TextField } from "@mui/material";
 
-export default function Stakeholder({ formData, handleInputChange, ZOHO, currentModuleData }) {
+export default function Stakeholder({
+  formData,
+  handleInputChange,
+  ZOHO,
+  currentModuleData,
+  selectedRowData,
+}) {
   const [stakeholders, setStakeholders] = useState([]);
   const [selectedStakeholder, setSelectedStakeholder] = useState(null);
   const [inputValue, setInputValue] = useState("");
 
   const debounceTimeoutRef = useRef(null);
 
-  console.log("mahadi", { currentModuleData, selectedStakeholder });
-
   /**
-   * Effect 1: Prepopulate selectedStakeholder
-   * Priority order:
-   * 1. If formData has a selected stakeholder, use that.
-   * 2. Else, use currentModuleData (fallback).
+   * Effect: Prepopulate selectedStakeholder (Runs Only Once when Mounted)
    */
   useEffect(() => {
+
     if (formData?.stakeHolder) {
       setSelectedStakeholder(formData.stakeHolder);
       setInputValue(formData.stakeHolder.name || "");
-    } else if (currentModuleData) {
+    } else if (!selectedRowData?.stakeHolder && currentModuleData?.Stake_Holder) {
       setSelectedStakeholder({
         id: currentModuleData?.Stake_Holder?.id,
         name: currentModuleData?.Stake_Holder?.name,
       });
       setInputValue(currentModuleData?.Stake_Holder?.name || "");
-    } else {
-      setSelectedStakeholder(null);
-      setInputValue("");
+    } else if (selectedRowData?.stakeHolder) {
+      setSelectedStakeholder({
+        id: selectedRowData?.stakeHolder?.id,
+        name: selectedRowData?.stakeHolder?.name,
+      });
+      setInputValue(selectedRowData?.stakeHolder?.name || ""); // Fixed inputValue source
     }
-  }, [formData, currentModuleData]);
+  }, []); // ✅ Runs only once when the component mounts
 
   /**
    * Fetch stakeholders from Zoho API based on query
    */
-  const fetchStakeholders = async (query) => {
-    if (!ZOHO || !query.trim()) return;
+  const fetchStakeholders = useCallback(
+    async (query) => {
+      if (!ZOHO || !query.trim()) return;
 
-    try {
-      const results = await ZOHO.CRM.API.searchRecord({
-        Entity: "Accounts",
-        Type: "word",
-        Query: query.trim(),
-      });
+      try {
+        const results = await ZOHO.CRM.API.searchRecord({
+          Entity: "Accounts",
+          Type: "word",
+          Query: query.trim(),
+        });
 
-      if (results.data) {
-        const formattedResults = results.data.map((record) => ({
-          id: record.id,
-          name: record.Account_Name,
-        }));
-        setStakeholders(formattedResults);
+        if (results.data) {
+          const formattedResults = results.data.map((record) => ({
+            id: record.id,
+            name: record.Account_Name,
+          }));
+          setStakeholders(formattedResults);
+        }
+      } catch (error) {
+        console.error("Error fetching stakeholders:", error);
       }
-    } catch (error) {
-      console.error("Error fetching stakeholders:", error);
-    }
-  };
+    },
+    [ZOHO]
+  ); // ✅ Added ZOHO as a dependency
 
   /**
-   * Debounced input change handler
+   * Debounced Input Change Handler
    */
   const handleInputChangeWithDebounce = useCallback(
     (event, newValue) => {
-      setInputValue(newValue);
+      setInputValue(newValue || "");
 
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
 
       debounceTimeoutRef.current = setTimeout(() => {
-        fetchStakeholders(newValue);
+        fetchStakeholders(newValue || "");
       }, 500);
     },
     [fetchStakeholders]
   );
 
   /**
-   * Handle stakeholder selection
+   * Handle Stakeholder Selection
    */
   const handleChange = (event, newValue) => {
     setSelectedStakeholder(newValue);
     handleInputChange("stakeHolder", newValue);
+
+    // ✅ If user clears the field, also clear input value
+    if (!newValue) {
+      setInputValue("");
+    }
   };
 
   return (
@@ -91,6 +104,8 @@ export default function Stakeholder({ formData, handleInputChange, ZOHO, current
       onChange={handleChange}
       inputValue={inputValue}
       onInputChange={handleInputChangeWithDebounce}
+      clearOnEscape
+      freeSolo
       renderInput={(params) => (
         <TextField
           {...params}
