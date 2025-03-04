@@ -169,7 +169,7 @@ export default function ContactField({
     };
 
     fetchParticipantsDetails();
-  }, [selectedRowData, currentModuleData]);
+  }, []);
 
   const handleOpen = () => {
     setFilteredContacts([]);

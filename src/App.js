@@ -252,13 +252,18 @@ const App = () => {
       }));
     }
 
+
+    const updatedHistoryName = participantsArray
+    .map((c) => c.Full_Name)
+    .join(", ");
+
     const normalizedRecord = {
       id: newRecord.id,
-      name: newRecord.name || "Unknown Name",
+      name: currentModuleData?.Name + " - " + updatedHistoryName,
       date_time: newRecord.Date || dayjs().format(), // Ensure date is consistent
       type: newRecord.History_Type || "Unknown Type",
       result: newRecord.History_Result || "No Result",
-      duration: newRecord.Duration || "N/A",
+      duration: newRecord.Duration_Min || "N/A",
       regarding: newRecord.Regarding || "No Regarding",
       details: newRecord.History_Details || "No Details",
       ownerName: newRecord.Owner?.full_name || "Unknown Owner",
@@ -287,6 +292,11 @@ const App = () => {
 
   const handleRecordUpdate = (updatedRecord) => {
 
+
+    const updatedHistoryName = selectedParticipants
+    .map((c) => c.Full_Name)
+    .join(", ");
+
     // Normalize updatedRecord keys to match relatedListData keys
     const normalizedRecord = {
       ...updatedRecord,
@@ -297,10 +307,8 @@ const App = () => {
       details: updatedRecord.History_Details,
       ownerName: updatedRecord?.Owner?.full_name,
       date_time: updatedRecord?.Date, // Ensure date is consistent
-      stakeHolder: updatedRecord?.Stakeholder
-      // name: updatedRecord.Participants
-      //     ? updatedRecord.Participants.map((c) => c.Full_Name).join(", ")
-      //     : updatedRecord.name,
+      stakeHolder: updatedRecord?.Stakeholder,
+      name: currentModuleData?.Name + " - " + updatedHistoryName,
     };
 
     console.log("Updated after by maddie:", updatedRecord);

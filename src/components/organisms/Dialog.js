@@ -340,9 +340,9 @@ export function Dialog({
   
         // Step 3: Prepare contact history insert requests
         const contactRequests = selectedParticipants.map((contact) => ({
-          Entity: "Applications_History", // Correct entity name
+          Entity: "Application_Hstory", // Correct entity name
           APIData: {
-            Application_History: { id: historyId }, // Corrected entity reference
+            Application_Hstory: { id: historyId }, // Corrected entity reference
             Contact: { id: contact.id },
           },
           Trigger: ["workflow"],
