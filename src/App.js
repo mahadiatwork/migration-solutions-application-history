@@ -31,6 +31,7 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 
 import { Dialog as MUIDialog } from "@mui/material";
 import { useSnackbar } from "notistack";
+import LinkifyText from "./components/atoms/LinkifyText";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -609,15 +610,7 @@ const App = () => {
                       {regarding}
                     </span>
                   )}
-                  <span
-                    style={{
-                      wordWrap: "break-word",
-                      whiteSpace: "normal",
-                      fontSize: "9pt",
-                    }}
-                  >
-                    {details || "No data"}
-                  </span>
+                  <LinkifyText details={details} />
                 </Box>
               </Paper>
             </Grid>
