@@ -371,8 +371,8 @@ export function Dialog({
         });
   
         const updatedRecord = {
-          id: selectedRowData?.id || null, // Ensure selectedRowData is passed or defined
           ...finalData,
+          id: historyId || null, // Set the first inserted History_X_Contacts ID (or null if none succeeded)
           Participants: selectedParticipants,
           stakeHolder: finalData?.Stakeholder,
         };
