@@ -36,6 +36,9 @@ const highlightText = (text, keyword) => {
 const DownloadButton = ({ rowId, rowIcon, isSelected }) => {
   const { enqueueSnackbar } = useSnackbar();
   const [waitingForDownload, setWaitingForDownload] = React.useState(false);
+
+
+  console.log({rowId})
   return (
     <IconButton
       sx={{ fontSize: "12pt" }}
@@ -43,13 +46,15 @@ const DownloadButton = ({ rowId, rowIcon, isSelected }) => {
       onClick={async () => {
         setWaitingForDownload(true);
         const { data } = await zohoApi.file.getAttachments({
-          module: "History1",
+          module: "Applications_History",
           recordId: rowId,
         });
 
+    
+
         if (data?.length > 0) {
           const downloadResp = await zohoApi.file.downloadAttachmentById({
-            module: "History1",
+            module: "Applications_History",
             recordId: rowId,
             attachmentId: data?.[0]?.id,
             fileName: data?.[0]?.File_Name,
@@ -326,7 +331,7 @@ export function Table({
                       <DownloadButton
                         // rowId={row?.id}
                         isSelected={isSelected}
-                        rowId={row.historyDetails?.id}
+                        rowId={row?.id}
                         rowIcon={<DownloadIcon />}
                       />
                     </TableCell>
