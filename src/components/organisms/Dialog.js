@@ -823,7 +823,7 @@ export function Dialog({
                     handleInputChange("type", e.target.value);
                     handleInputChange(
                       "result",
-                      getResultOptions(e.target.value)
+                      getResultOptions(e.target.value)[0]
                     );
                     setSelectedType(e.target.value);
                   }}
