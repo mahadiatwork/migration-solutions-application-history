@@ -7,14 +7,11 @@ import {
   TextField,
   Box,
 } from "@mui/material";
+import { getRegardingOptions } from "./helperFunc";
+
 
 const RegardingField = ({ formData, handleInputChange }) => {
-  const predefinedOptions = [
-    "Hourly Consult $220",
-    "Initial Consultation Fee $165",
-    "No appointments today",
-    "No appointments tonight",
-  ]; // The predefined options
+  const predefinedOptions = getRegardingOptions(formData.type) || []; // Get predefined options dynamically
 
   const [selectedValue, setSelectedValue] = useState("");
   const [manualInput, setManualInput] = useState("");
@@ -32,7 +29,7 @@ const RegardingField = ({ formData, handleInputChange }) => {
       setSelectedValue("");
       setManualInput("");
     }
-  }, [formData.regarding]);
+  }, [formData.regarding, predefinedOptions]);
 
   const handleSelectChange = (event) => {
     const value = event.target.value;
