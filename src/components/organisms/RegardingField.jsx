@@ -1,63 +1,61 @@
 import React, { useState, useEffect } from "react";
-import {
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  TextField,
-  Box,
-} from "@mui/material";
+import { FormControl, InputLabel, Select, MenuItem, TextField, Box, Typography } from "@mui/material";
 import { getRegardingOptions } from "./helperFunc";
 
-
-const RegardingField = ({ formData, handleInputChange }) => {
-  const predefinedOptions = getRegardingOptions(formData.type) || []; // Get predefined options dynamically
+const RegardingField = ({ formData, handleInputChange, selectedRowData }) => {
+  const existingValue = selectedRowData?.regarding || formData.regarding;
+  const predefinedOptions = getRegardingOptions(formData.type, existingValue);
 
   const [selectedValue, setSelectedValue] = useState("");
   const [manualInput, setManualInput] = useState("");
+  const [showManualInput, setShowManualInput] = useState(false); // New state to control visibility
 
   useEffect(() => {
-    if (formData.regarding) {
-      if (predefinedOptions.includes(formData.regarding)) {
-        setSelectedValue(formData.regarding);
+    if (existingValue) {
+      if (predefinedOptions.includes(existingValue)) {
+        setSelectedValue(existingValue);
         setManualInput("");
       } else {
         setSelectedValue("Other");
-        setManualInput(formData.regarding);
+        setManualInput(existingValue);
       }
     } else {
       setSelectedValue("");
       setManualInput("");
     }
-  }, [formData.regarding, predefinedOptions]);
+    if (existingValue !== "Other") {
+      setShowManualInput(false); 
+    }
+  }, [formData.type]); // ✅ Removed `selectedValue`
+  
 
   const handleSelectChange = (event) => {
     const value = event.target.value;
     setSelectedValue(value);
-
-    if (value !== "Other") {
-      setManualInput(""); // Clear manual input if predefined option is selected
-      handleInputChange("regarding", value); // Pass the selected value to parent
+  
+    if (value === "Other") {
+      setShowManualInput(true); 
+      setManualInput(""); 
+      handleInputChange("regarding", "Other"); // ✅ Set "Other" in formData
     } else {
-      handleInputChange("regarding", ""); // Clear regarding in parent
+      console.log({value})
+      setShowManualInput(false); 
+      setManualInput("");
+      handleInputChange("regarding", value);
     }
   };
+  
 
   const handleManualInputChange = (event) => {
     const value = event.target.value;
     setManualInput(value);
-    handleInputChange("regarding", value); // Pass the manual input to parent
+    handleInputChange("regarding", value);
   };
 
   return (
     <Box sx={{ width: "100%", mt: "3px" }}>
       <FormControl fullWidth size="small" variant="standard">
-        <InputLabel
-          id="regarding-label"
-          sx={{
-            fontSize: "9pt",
-          }}
-        >
+        <InputLabel id="regarding-label" sx={{ fontSize: "9pt" }}>
           Regarding
         </InputLabel>
         <Select
@@ -65,12 +63,7 @@ const RegardingField = ({ formData, handleInputChange }) => {
           id="regarding-select"
           value={selectedValue}
           onChange={handleSelectChange}
-          sx={{
-            "& .MuiInputBase-root": {
-              padding: "0 !important",
-            },
-            fontSize: "9pt",
-          }}
+          sx={{ "& .MuiInputBase-root": { padding: "0 !important" }, fontSize: "9pt" }}
         >
           {predefinedOptions.map((option) => (
             <MenuItem key={option} value={option} sx={{ fontSize: "9pt" }}>
@@ -82,7 +75,8 @@ const RegardingField = ({ formData, handleInputChange }) => {
           </MenuItem>
         </Select>
       </FormControl>
-      {selectedValue === "Other" && (
+
+      {showManualInput ? 
         <TextField
           label="Enter your custom regarding"
           fullWidth
@@ -92,18 +86,12 @@ const RegardingField = ({ formData, handleInputChange }) => {
           onChange={handleManualInputChange}
           sx={{
             mt: 2,
-            "& .MuiInputBase-input": {
-              fontSize: "9pt", // Set input text size
-            },
-            "& .MuiInputLabel-root": {
-              fontSize: "9pt", // Set label text size
-            },
-            "& .MuiFormHelperText-root": {
-              fontSize: "9pt", // Set helper text size if needed
-            },
+            "& .MuiInputBase-input": { fontSize: "9pt" },
+            "& .MuiInputLabel-root": { fontSize: "9pt" },
+            "& .MuiFormHelperText-root": { fontSize: "9pt" },
           }}
-        />
-      )}
+        /> : <></>
+      }
     </Box>
   );
 };
