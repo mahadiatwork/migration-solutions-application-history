@@ -15,6 +15,9 @@ import {
   Alert,
   Grid,
   InputAdornment,
+  Modal,
+  Paper,
+  Typography,
 } from "@mui/material";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -33,6 +36,7 @@ import ApplicationTable from "./ApplicationTable";
 import ApplicationDialog from "./ApplicationTable";
 import Stakeholder from "../atoms/Stakeholder";
 import ApplicationField from "./ApplicationField";
+import { Close } from "@mui/icons-material";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -782,7 +786,28 @@ export function Dialog({
     setSelectedApplicationId(null);
   };
 
+  const [openConfirmDialog, setOpenConfirmDialog] = React.useState(false);
 
+  const handleAttachmentDelete = async () => {
+    const deleteFileResp = await zohoApi.file.deleteAttachment({
+      module: "Applications_History",
+      recordId: selectedRowData?.id,
+      attachment_id: loadedAttachmentFromRecord?.[0]?.id,
+    });
+
+
+    console.log({
+      deleteFileResp
+    })
+    // Update state to remove attachment
+    setFormData((prev) => ({
+      ...prev,
+      attachment: null,
+    }));
+
+    setOpenConfirmDialog(false); // Close confirmation dialog
+
+  }
 
   return (
     <>
@@ -1073,7 +1098,7 @@ export function Dialog({
               fontSize: "9pt",
             }}
           >
-            <Box
+               <Box
               sx={{
                 display: "flex",
                 alignItems: "center",
@@ -1093,6 +1118,18 @@ export function Dialog({
                 placeholder="No file selected"
                 InputProps={{
                   readOnly: true,
+                  endAdornment: formData?.attachment?.name ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        // onClick={handleAttachmentDelete}
+                        onClick={() => setOpenConfirmDialog(true)}
+                        sx={{ padding: 0.5 }}
+                      >
+                        <Close fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : null,
                 }}
               />
 
@@ -1109,19 +1146,52 @@ export function Dialog({
               >
                 Attachment
                 <VisuallyHiddenInput type="file" onChange={handleSelectFile} />
-                {/* <input
-                  type="file"
-                  hidden
-                  onChange={(e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                      handleInputChange("attachment", file);
-                    }
-                  }}
-                /> */}
               </Button>
             </Box>
           </Box>
+          <Modal
+            open={openConfirmDialog}
+            onClose={() => setOpenConfirmDialog(false)}
+          >
+            <Paper sx={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              padding: 3,
+              width: 300,
+              textAlign: "center",
+              boxShadow: 24,
+            }}>
+              <Typography id="confirm-delete-modal" variant="h6">
+                Confirm Deletion
+              </Typography>
+              <Typography variant="body2" sx={{ marginY: 2 }}>
+                Are you sure you want to delete this attachment? This action cannot be undone.
+              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+                <Button onClick={() => setOpenConfirmDialog(false)} color="primary">
+                  Cancel
+                </Button>
+                <Button onClick={handleAttachmentDelete} color="error">
+                  Delete
+                </Button>
+              </Box>
+            </Paper>
+
+            {/* <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogContent>
+            Are you sure you want to delete this attachment? This action cannot be undone.
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setOpenConfirmDialog(false)} color="primary">
+                Cancel
+              </Button>
+              <Button onClick={handleAttachmentDelete} color="error">
+                Delete
+              </Button>
+            </DialogActions> */}
+          </Modal>
 
           <Box>
             <TextField
