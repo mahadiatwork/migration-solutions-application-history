@@ -170,7 +170,7 @@ const ApplicationDialog = ({
           }),
         };
 
-        ZOHO.CRM.FUNCTIONS.execute(func_name, req_data).then(function (data) {
+        await ZOHO.CRM.FUNCTIONS.execute(func_name, req_data).then(function (data) {
           console.log(data);
         });
 

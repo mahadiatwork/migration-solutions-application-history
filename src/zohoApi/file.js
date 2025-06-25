@@ -172,7 +172,6 @@ async function downloadAttachmentById({
       window.URL.revokeObjectURL(blobURL);
     }, 100);
   }
-
   try {
     const config = {
       url: access_token_api_url,
@@ -192,7 +191,6 @@ async function downloadAttachmentById({
 
     downloadFile(resp?.data, fileName);
   } catch (downloadAttachmentByIdError) {
-    console.log({ downloadAttachmentByIdError });
     return {
       data: null,
       error: "Something went wrong",
