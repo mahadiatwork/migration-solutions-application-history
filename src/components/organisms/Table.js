@@ -304,6 +304,7 @@ export function Table({
                           textOverflow: "ellipsis",
                           whiteSpace: "normal",
                           padding: "4px",
+                          lineHeight: 1
                         }}
                       >
                         {highlightText(row.details || "No Details", keyword)}
