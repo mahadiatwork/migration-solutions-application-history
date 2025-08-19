@@ -168,7 +168,7 @@ export function Table({
   keyword
 }) {
   const [order, setOrder] = React.useState("desc");
-  const [orderBy, setOrderBy] = React.useState("name");
+  const [orderBy, setOrderBy] = React.useState("date_time");
   const [selectedRowId, setSelectedRowId] = React.useState(highlightedRecordId); // Sync with highlightedRecordId
 
   // Ensure selectedRowId matches highlightedRecordId on updates
