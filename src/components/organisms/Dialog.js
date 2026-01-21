@@ -102,7 +102,7 @@ export function Dialog({
     loggedInUser ||
     null
   );
-  const [selectedType, setSelectedType] = React.useState("Meeting");
+  // const [selectedType, setSelectedType] = React.useState("Meeting");
   const [loadedAttachmentFromRecord, setLoadedAttachmentFromRecord] =
     React.useState();
   const [formData, setFormData] = React.useState(selectedRowData || {}); // Form data state
@@ -654,7 +654,7 @@ export function Dialog({
                       getResultOptions(e.target.value)[0]
                     );
                     handleInputChange("regarding",  getRegardingOptions(e.target.value)[0]);
-                    setSelectedType(e.target.value);
+                    // setSelectedType(e.target.value);
                   }}
                   label="Type"
                   sx={{
