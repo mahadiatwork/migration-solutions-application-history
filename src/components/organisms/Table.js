@@ -330,11 +330,13 @@ export function Table({
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        row?.id &&
+                        const historyId = row.history_id || row.historyDetails?.id || row.id;
+                        if (historyId) {
                           window.open(
-                            `https://crm.zoho.com.au/crm/org7004396182/tab/CustomModule2/${row.id}`,
+                            `https://crm.zoho.com.au/crm/org7004396182/tab/CustomModule2/${historyId}`,
                             "_blank"
                           );
+                        }
                       }}
                     >
                       {row.name || "Unknown Name"}

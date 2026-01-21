@@ -13,29 +13,64 @@ export default function Stakeholder({
   const [inputValue, setInputValue] = useState("");
 
   const debounceTimeoutRef = useRef(null);
+  const expectedIdRef = useRef(null);
+  const lastFetchedIdRef = useRef(null);
 
   /**
-   * Effect: Prepopulate selectedStakeholder (Runs Only Once when Mounted)
+   * Effect: Handle formData.stakeHolder changes and fetch name if id exists but name is empty
    */
   useEffect(() => {
+    if (!formData?.stakeHolder) {
+      expectedIdRef.current = null;
+      lastFetchedIdRef.current = null;
+      setSelectedStakeholder(null);
+      setInputValue("");
+      return;
+    }
 
-    if (formData?.stakeHolder) {
+    if (formData.stakeHolder.name) {
+      setSelectedStakeholder(formData.stakeHolder);
+      setInputValue(formData.stakeHolder.name);
+      return;
+    }
+
+    const id = formData.stakeHolder.id;
+    if (!id || !ZOHO) return;
+
+    if (lastFetchedIdRef.current === id) {
       setSelectedStakeholder(formData.stakeHolder);
       setInputValue(formData.stakeHolder.name || "");
-    } else if (!selectedRowData?.stakeHolder && currentModuleData?.Stake_Holder) {
-      setSelectedStakeholder({
-        id: currentModuleData?.Stake_Holder?.id,
-        name: currentModuleData?.Stake_Holder?.name,
-      });
-      setInputValue(currentModuleData?.Stake_Holder?.name || "");
-    } else if (selectedRowData?.stakeHolder) {
-      setSelectedStakeholder({
-        id: selectedRowData?.stakeHolder?.id,
-        name: selectedRowData?.stakeHolder?.name,
-      });
-      setInputValue(selectedRowData?.stakeHolder?.name || ""); // Fixed inputValue source
+      return;
     }
-  }, []); // ✅ Runs only once when the component mounts
+
+    lastFetchedIdRef.current = id;
+    expectedIdRef.current = id;
+
+    ZOHO.CRM.API.getRecord({
+      Entity: "Accounts",
+      RecordID: id,
+      approved: "both",
+    })
+      .then((response) => {
+        if (expectedIdRef.current !== id) return;
+        const name = response?.data?.[0]?.Account_Name || "";
+        if (name) {
+          const full = { id, name };
+          handleInputChange("stakeHolder", full);
+          setSelectedStakeholder(full);
+          setInputValue(name);
+        } else {
+          setSelectedStakeholder(formData.stakeHolder);
+          setInputValue("");
+        }
+      })
+      .catch((err) => {
+        if (expectedIdRef.current !== id) return;
+        console.error("Error fetching stakeholder by id:", err);
+        setSelectedStakeholder(formData.stakeHolder);
+        setInputValue("");
+      });
+  }, [formData, ZOHO, handleInputChange]);
 
   /**
    * Fetch stakeholders from Zoho API based on query
@@ -63,7 +98,7 @@ export default function Stakeholder({
       }
     },
     [ZOHO]
-  ); // ✅ Added ZOHO as a dependency
+  );
 
   /**
    * Debounced Input Change Handler

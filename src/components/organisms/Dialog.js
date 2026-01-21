@@ -8,7 +8,6 @@ import {
   Dialog as MUIDialog,
   Select,
   MenuItem,
-  Chip,
   FormControl,
   InputLabel,
   Snackbar,
@@ -18,6 +17,7 @@ import {
   Modal,
   Paper,
   Typography,
+  CircularProgress,
 } from "@mui/material";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -29,10 +29,8 @@ import { getRegardingOptions, getResultOptions } from "./helperFunc";
 import ContactField from "./ContactFields";
 import RegardingField from "./RegardingField";
 import IconButton from "@mui/material/IconButton"; // For the clickable icon button
-import CalendarMonthIcon from "@mui/icons-material/CalendarMonth"; // For the calendar icon
 import { styled } from "@mui/material/styles";
 import { zohoApi } from "../../zohoApi";
-import ApplicationTable from "./ApplicationTable";
 import ApplicationDialog from "./ApplicationTable";
 import Stakeholder from "../atoms/Stakeholder";
 import ApplicationField from "./ApplicationField";
@@ -49,14 +47,6 @@ const VisuallyHiddenInput = styled("input")({
   whiteSpace: "nowrap",
   width: 1,
 });
-
-const debounce = (func, delay) => {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => func(...args), delay);
-  };
-};
 
 const durationOptions = Array.from({ length: 24 }, (_, i) => (i + 1) * 10);
 
@@ -104,7 +94,7 @@ export function Dialog({
   selectedParticipants,
   setSelectedParticipants
 }) {
-  const [historyName, setHistoryName] = React.useState("");
+  const [, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);
   const [selectedOwner, setSelectedOwner] = React.useState(
     ownerList?.find(
@@ -116,10 +106,8 @@ export function Dialog({
   const [selectedType, setSelectedType] = React.useState("Meeting");
   const [loadedAttachmentFromRecord, setLoadedAttachmentFromRecord] =
     React.useState();
-  const [regarding, setRegarding] = React.useState(
-    selectedRowData?.regarding || ""
-  );
   const [formData, setFormData] = React.useState(selectedRowData || {}); // Form data state
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
   // console.log({ formData });
   const [snackbar, setSnackbar] = React.useState({
     open: false,
@@ -143,9 +131,11 @@ export function Dialog({
   React.useEffect(() => {
     let load = true;
     const getAttachment = async ({ rowData }) => {
+      // Use main record id (e.g., historyDetails?.id or history_id), not the junction row id
+      const mainRecordId = rowData?.historyDetails?.id || rowData?.history_id || rowData?.id;
       const { data } = await zohoApi.file.getAttachments({
         module: "Applications_History",
-        recordId: rowData?.id,
+        recordId: mainRecordId,
       });
       setFormData((prev) => ({
         ...prev,
@@ -153,13 +143,12 @@ export function Dialog({
       }));
       setLoadedAttachmentFromRecord(data);
     };
-    if (selectedRowData?.id && load) {
+    const mainRecordId = selectedRowData?.historyDetails?.id || selectedRowData?.history_id || selectedRowData?.id;
+    if (mainRecordId && load) {
       load = false;
       getAttachment({ rowData: selectedRowData });
-      // getAttachment({
-      //   selectedRowData: { historyDetails: { id: "76775000001772113" } },
-      // });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch attachment; zohoApi stable
   }, [selectedRowData]);
 
   // console.log({ selectedRowData })
@@ -167,17 +156,26 @@ export function Dialog({
   // Reinitialize dialog state when `openDialog` or `obj` changes
   React.useEffect(() => {
     if (openDialog) {
-      setFormData({
-        Participants: selectedRowData?.Participants || [],
-        result: selectedRowData?.result || "Meeting Held",
-        type: selectedRowData?.type || "Meeting",
-        duration: selectedRowData?.duration || "60",
-        regarding: selectedRowData?.regarding || "",
-        details: selectedRowData?.details || "",
-        stakeHolder: selectedRowData?.stakeHolder || null,
-        date_time: selectedRowData?.date_time
-          ? dayjs(selectedRowData.date_time)
-          : dayjs(),
+      setIsSubmitting(false);
+      setFormData((prev) => {
+        const base = {
+          Participants: selectedRowData?.Participants || [],
+          result: selectedRowData?.result || "Meeting Held",
+          type: selectedRowData?.type || "Meeting",
+          duration: selectedRowData?.duration || "60",
+          regarding: selectedRowData?.regarding || "",
+          details: selectedRowData?.details || "",
+          stakeHolder: (selectedRowData?.stakeHolder && typeof selectedRowData.stakeHolder === "object" && selectedRowData.stakeHolder?.id !== null && selectedRowData.stakeHolder?.id !== undefined)
+            ? selectedRowData.stakeHolder
+            : null,
+          date_time: selectedRowData?.date_time
+            ? dayjs(selectedRowData.date_time)
+            : dayjs(),
+        };
+        return {
+          ...base,
+          attachment: selectedRowData ? prev?.attachment : undefined,
+        };
       });
       setSelectedContacts(
         selectedContacts || []
@@ -199,6 +197,7 @@ export function Dialog({
       // Reset formData to avoid stale data
       setFormData({});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- form init; ownerList/setSelectedContacts stable
   }, [openDialog, selectedRowData, loggedInUser, currentContact]);
 
   React.useEffect(() => {
@@ -233,6 +232,7 @@ export function Dialog({
     if (openDialog) {
       fetchHistoryData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch history data; ZOHO/setSelectedContacts stable
   }, [selectedRowData?.historyDetails, openDialog]);
 
   React.useEffect(() => {
@@ -242,16 +242,13 @@ export function Dialog({
     setHistoryName(names);
   }, [selectedContacts]);
 
-  const handleRegardingChange = (event) => {
-    setRegarding(event.target.value); // Update the state with user input
-  };
-
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setIsSubmitting(true);
 
     let selectedParticipants = [];
 
@@ -309,6 +306,7 @@ export function Dialog({
         severity: "error",
       });
     } finally {
+      setIsSubmitting(false);
       handleCloseDialog();
     }
   };
@@ -593,212 +591,21 @@ export function Dialog({
     "Other",
   ];
 
-  const resultOptions = React.useMemo(() => {
-    if (selectedType === "Meeting") {
-      return ["Meeting Held", "Meeting Not Held"];
-    }
-    if (selectedType === "To-Do") {
-      return ["To-do Done", "To-do Not Done"];
-    }
-    if (selectedType === "Appointment") {
-      return ["Appointment Completed", "Appointment Not Completed"];
-    }
-    if (selectedType === "Boardroom") {
-      return ["Boardroom - Completed", "Boardroom - Not Completed"];
-    }
-    if (selectedType === "Call Billing") {
-      return ["Call Billing - Completed", "  Call Billing - Not Completed"];
-    }
-    if (selectedType === "Email Billing") {
-      return ["Email Billing - Completed", "Email Billing - Not Completed"];
-    }
-    if (selectedType === "Initial Consultation") {
-      return [
-        "Initial Consultation - Completed",
-        "Initial Consultation - Not Completed",
-      ];
-    }
-    if (selectedType === "Call") {
-      return [
-        "Call Attempted",
-        " Call Completed",
-        " Call Left Message",
-        " Call Received",
-      ];
-    }
-    if (selectedType === "Mail") {
-      return ["Mail - Completed", "Mail - Not Completed"];
-    }
-    if (selectedType === "Meeting Billing") {
-      return ["Meeting Billing - Completed", "Meeting Billing - Not Completed"];
-    }
-    if (selectedType === "Personal Activity") {
-      return [
-        "Personal Activity - Completed",
-        "Personal Activity - Not Completed",
-        "Note",
-        "Mail Received",
-        "Mail Sent",
-        "Email Received",
-        "Courier Sent",
-        "Email Sent",
-        "Payment Received",
-      ];
-    }
-    if (selectedType === "Room 1") {
-      return ["Room 1 - Completed", "Room 1 - Not Completed"];
-    }
-    if (selectedType === "Room 2") {
-      return ["Room 2 - Completed", "Room 2 - Not Completed"];
-    }
-    if (selectedType === "Room 3") {
-      return ["Room 3 - Completed", "Room 3 - Not Completed"];
-    }
-    if (selectedType === "To Do Billing") {
-      return ["To Do Billing - Completed", "To Do Billing - Not Completed"];
-    }
-    if (selectedType === "Vacation") {
-      return [
-        "Vacation - Completed",
-        "Vacation - Not Completed",
-        "Vacation Cancelled",
-      ];
-    }
-    if (selectedType === "Other") {
-      return [
-        "Attachment",
-        "E-mail Attachment",
-        "E-mail Auto Attached",
-        "E-mail Sent",
-      ];
-    }
-
-    return [
-      "Call Attempted",
-      "Call Completed",
-      "Call Left Message",
-      "Call Received",
-      "Meeting Held",
-      "Meeting Not Held",
-      "To-do Done",
-      "To-do Not Done",
-      "Appointment Completed",
-      "Appointment Not Completed",
-      "Boardroom - Completed",
-      "Boardroom - Not Completed",
-      "Call Billing - Completed",
-      "Initial Consultation - Completed",
-      "Initial Consultation - Not Completed",
-      "Mail - Completed",
-      "Mail - Not Completed",
-      "Meeting Billing - Completed",
-      "Meeting Billing - Not Completed",
-      "Personal Activity - Completed",
-      "Personal Activity - Not Completed",
-      "Note",
-      "Mail Received",
-      "Mail Sent",
-      "Email Received",
-      "Courier Sent",
-      "Email Sent",
-      "Payment Received",
-      "Room 1 - Completed",
-      "Room 1 - Not Completed",
-      "Room 2 - Completed",
-      "Room 2 - Not Completed",
-      "Room 3 - Completed",
-      "Room 3 - Not Completed",
-      "To Do Billing - Completed",
-      "To Do Billing - Not Completed",
-      "Vacation - Completed",
-      "Vacation - Not Completed",
-      "Vacation Cancelled",
-      "Attachment",
-      "E-mail Attachment",
-    ];
-  }, [selectedType]);
-
-  const [selectedApplicationId, setSelectedApplicationId] =
+  const [, setSelectedApplicationId] =
     React.useState(null);
-
-  const handleApplicationSelect = async () => {
-    if (!selectedApplicationId) {
-      setSnackbar({
-        open: true,
-        message: "Please select an application.",
-        severity: "warning",
-      });
-      return;
-    }
-
-    try {
-      // Delete the current history and associated contacts
-      await handleDelete();
-      // Create a new application history in the selected application
-      const createApplicationHistory = await ZOHO.CRM.API.insertRecord({
-        Entity: "Application History",
-        APIData: {
-          Name: formData.Name,
-          Application: { id: selectedApplicationId },
-          Details: formData.details,
-          Date: formData.date_time,
-        },
-        Trigger: ["workflow"],
-      });
-
-      if (createApplicationHistory?.data[0]?.code === "SUCCESS") {
-        const newHistoryId = createApplicationHistory.data[0].details.id;
-
-        // Create ApplicationxContacts for all associated contacts
-        for (const contact of historyContacts) {
-          await ZOHO.CRM.API.insertRecord({
-            Entity: "ApplicationxContacts",
-            APIData: {
-              Application_History: { id: newHistoryId },
-              Contact: { id: contact.id },
-            },
-            Trigger: ["workflow"],
-          });
-        }
-
-        setSnackbar({
-          open: true,
-          message: "History moved successfully!",
-          severity: "success",
-        });
-      } else {
-        throw new Error("Failed to create new application history.");
-      }
-    } catch (error) {
-      console.error("Error moving history:", error);
-      setSnackbar({
-        open: true,
-        message: "Failed to move history.",
-        severity: "error",
-      });
-    } finally {
-      handleApplicationDialogClose();
-    }
-  };
 
   const handleApplicationDialogClose = () => {
     setOpenApplicationDialog(false);
-    setSelectedApplicationId(null);
   };
 
   const [openConfirmDialog, setOpenConfirmDialog] = React.useState(false);
 
   const handleAttachmentDelete = async () => {
-    const deleteFileResp = await zohoApi.file.deleteAttachment({
+    await zohoApi.file.deleteAttachment({
       module: "Applications_History",
       recordId: selectedRowData?.id,
       attachment_id: loadedAttachmentFromRecord?.[0]?.id,
     });
-
-
-    console.log({
-      deleteFileResp
-    })
     // Update state to remove attachment
     setFormData((prev) => ({
       ...prev,
@@ -1225,6 +1032,7 @@ export function Dialog({
                 onClick={handleDelete}
                 variant="outlined"
                 color="error"
+                disabled={isSubmitting}
                 sx={{
                   fontSize: "9pt",
                   marginLeft: "8px",
@@ -1238,6 +1046,7 @@ export function Dialog({
                 onClick={handleMoveToApplication}
                 variant="outlined"
                 color="success"
+                disabled={isSubmitting}
                 sx={{
                   fontSize: "9pt",
                   marginLeft: "8px",
@@ -1256,12 +1065,19 @@ export function Dialog({
             <Button
               onClick={handleCloseDialog}
               variant="outlined"
+              disabled={isSubmitting}
               sx={{ fontSize: "9pt" }}
             >
               Cancel
             </Button>
-            <Button type="submit" variant="contained" sx={{ fontSize: "9pt" }}>
-              {buttonText}
+            <Button 
+              type="submit" 
+              variant="contained" 
+              disabled={isSubmitting}
+              sx={{ fontSize: "9pt", display: "flex", alignItems: "center", gap: 1 }}
+            >
+              {isSubmitting && <CircularProgress size={16} />}
+              {isSubmitting ? "Saving..." : buttonText}
             </Button>
           </Box>
         </DialogActions>

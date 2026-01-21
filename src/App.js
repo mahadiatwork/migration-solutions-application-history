@@ -23,7 +23,7 @@ import {
   TableHead,
   TableRow,
 } from "@mui/material";
-import { setCurrentGlobalContact, getCurrentContact } from "./GlobalState";
+import { setCurrentGlobalContact } from "./GlobalState";
 import { DialogTitle, DialogContent, DialogActions } from "@mui/material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -71,7 +71,7 @@ const App = () => {
     <CircularProgress />
   );
   const [relatedListData, setRelatedListData] = React.useState([]);
-  const [selectedRecordId, setSelectedRecordId] = React.useState(null);
+  const [, setSelectedRecordId] = React.useState(null);
   const [openEditDialog, setOpenEditDialog] = React.useState(false);
   const [openCreateDialog, setOpenCreateDialog] = React.useState(false);
   const [ownerList, setOwnerList] = React.useState([]);
@@ -82,8 +82,8 @@ const App = () => {
   const [keyword, setKeyword] = React.useState("");
   const [loggedInUser, setLoggedInUser] = React.useState(null);
   const [selectedRowData, setSelectedRowData] = React.useState(null);
+  // eslint-disable-next-line no-unused-vars -- setter not used but state value is needed
   const [currentContact, setCurrentContact] = React.useState(null);
-  const [zohoLoaded, setZohoLoaded] = React.useState(false);
   const [regarding, setRegarding] = React.useState("");
   const [details, setDetails] = React.useState("");
   const [selectedContacts, setSelectedContacts] = React.useState([]);
@@ -139,101 +139,117 @@ const App = () => {
     // setDetails(""); // Clear the details field
   };
 
-  React.useEffect(() => {
-    const fetchRLData = async () => {
-      try {
-        const { data } = await zohoApi.record.getRecordsFromRelatedList({
-          module,
-          recordId,
-          RelatedListAPI: "Application_History",
-        });
+  const fetchRLData = async (options = {}) => {
+    if (!module || !recordId) return;
+    try {
+      const { data } = await zohoApi.record.getRecordsFromRelatedList({
+        module,
+        recordId,
+        RelatedListAPI: "Application_History",
+      });
 
-        const usersResponse = await ZOHO.CRM.API.getAllUsers({
-          Type: "AllUsers",
-        });
-        const validUsers = usersResponse?.users?.filter(
-          (user) => user?.full_name && user?.id
-        );
-        setOwnerList(validUsers || []);
+      const usersResponse = await ZOHO.CRM.API.getAllUsers({
+        Type: "AllUsers",
+      });
+      const validUsers = usersResponse?.users?.filter(
+        (user) => user?.full_name && user?.id
+      );
+      setOwnerList(validUsers || []);
 
-        const currentUserResponse = await ZOHO.CRM.CONFIG.getCurrentUser();
-        setLoggedInUser(currentUserResponse?.users?.[0] || null);
+      const currentUserResponse = await ZOHO.CRM.CONFIG.getCurrentUser();
+      setLoggedInUser(currentUserResponse?.users?.[0] || null);
 
-        const currentModuleResponse = await ZOHO.CRM.API.getRecord({
-          Entity: module,
-          approved: "both",
-          RecordID: recordId,
-        });
-
-
-        setCurrentModuleData(currentModuleResponse?.data?.[0] || null);
-        
-        if (currentContact) {
-          setCurrentGlobalContact(currentContact);
-        }
+      const currentModuleResponse = await ZOHO.CRM.API.getRecord({
+        Entity: module,
+        approved: "both",
+        RecordID: recordId,
+      });
 
 
-        const tempData = data?.map((obj) => ({
-          name: obj?.Name || "No Name",
-          id: obj?.id,
-          date_time: obj?.Date,
-          type: obj?.History_Type || "Unknown Type",
-          result: obj?.History_Result || "No Result",
-          duration: obj?.Duration_Min || "N/A",
-          regarding: obj?.Regarding || "No Regarding",
-          details: obj?.History_Details || "No Details",
-          icon: <DownloadIcon />,
-          ownerName: obj?.Owner?.name || "Unknown Owner",
-          stakeHolder: obj?.Stakeholder,
-          // Participants:
-          currentData: currentModuleData
-        }));
+      setCurrentModuleData(currentModuleResponse?.data?.[0] || null);
+      
+      if (currentContact) {
+        setCurrentGlobalContact(currentContact);
+      }
 
-        setRelatedListData(tempData || []);
-        
-        const types = data
-          ?.map((el) => el.History_Type)
-          ?.filter((el) => el !== undefined && el !== null);
 
-        const sortedTypes = [...new Set(types)].sort((a, b) =>
-          a.localeCompare(b)
-        ); // Sort alphabetically
+      const tempData = data?.map((obj) => ({
+        name: obj?.Name || "No Name",
+        id: obj?.id,
+        date_time: obj?.Date,
+        type: obj?.History_Type || "Unknown Type",
+        result: obj?.History_Result || "No Result",
+        duration: obj?.Duration_Min || "N/A",
+        regarding: obj?.Regarding || "No Regarding",
+        details: obj?.History_Details || "No Details",
+        icon: <DownloadIcon />,
+        ownerName: obj?.Owner?.name || "Unknown Owner",
+        stakeHolder: (() => {
+          const flatId = obj["Contact_History_Info.Stakeholder.id"];
+          const flatName = obj["Contact_History_Info.Stakeholder.Account_Name"];
+          const nested = obj["Contact_History_Info.Stakeholder"];
+          const junction = obj?.Stakeholder; // if lookup is on the junction record
 
-        const additionalTypes = [
-          "Meeting",
-          "To-Do",
-          "Call",
-          "Appointment",
-          "Boardroom",
-          "Call Billing",
-          "Email Billing",
-          "Initial Consultation",
-          "Mail",
-          "Meeting Billing",
-          "Personal Activity",
-          "Room 1",
-          "Room 2",
-          "Room 3",
-          "Todo Billing",
-          "Vacation",
-        ]; // Example additional options
+          const id = flatId ?? (nested && typeof nested === "object" ? nested.id : undefined) ?? (junction && typeof junction === "object" ? junction.id : undefined);
+          const rawName = flatName ?? (nested && typeof nested === "object" ? (nested.Account_Name ?? nested.name) : undefined) ?? (junction && typeof junction === "object" ? (junction.Account_Name ?? junction.name) : undefined);
 
-        const sortedTypesWithAdditional = [
-          ...new Set([...additionalTypes, ...sortedTypes]), // Merge additional options with existing ones
-        ].sort((a, b) => a.localeCompare(b)); // Sort alphabetically
+          return id !== null && id !== undefined ? { id, name: rawName || "" } : null;
+        })(),
+        // Participants:
+        currentData: currentModuleData
+      }));
 
-        setTypeList(sortedTypesWithAdditional);
+      setRelatedListData(tempData || []);
+      
+      const types = data
+        ?.map((el) => el.History_Type)
+        ?.filter((el) => el !== undefined && el !== null);
 
-        setInitPageContent(null);
-      } catch (error) {
-        console.error("Error fetching data:", error);
+      const sortedTypes = [...new Set(types)].sort((a, b) =>
+        a.localeCompare(b)
+      ); // Sort alphabetically
+
+      const additionalTypes = [
+        "Meeting",
+        "To-Do",
+        "Call",
+        "Appointment",
+        "Boardroom",
+        "Call Billing",
+        "Email Billing",
+        "Initial Consultation",
+        "Mail",
+        "Meeting Billing",
+        "Personal Activity",
+        "Room 1",
+        "Room 2",
+        "Room 3",
+        "Todo Billing",
+        "Vacation",
+      ]; // Example additional options
+
+      const sortedTypesWithAdditional = [
+        ...new Set([...additionalTypes, ...sortedTypes]), // Merge additional options with existing ones
+      ].sort((a, b) => a.localeCompare(b)); // Sort alphabetically
+
+      setTypeList(sortedTypesWithAdditional);
+
+      setInitPageContent(null);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+      if (options.isBackground) {
+        enqueueSnackbar("Failed to refresh data", { variant: "error" });
+      } else {
         setInitPageContent("Error loading data.");
       }
-    };
+    }
+  };
 
+  React.useEffect(() => {
     if (module && recordId) {
       fetchRLData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchRLData is stable, module and recordId are the only deps needed
   }, [module, recordId]);
 
   const [highlightedRecordId, setHighlightedRecordId] = React.useState(null);
@@ -284,6 +300,9 @@ const App = () => {
     setDetails(normalizedRecord.details || "No Details");
     setSelectedContacts(newRecord.Participants);
     // Debug logs
+
+    // Background refetch after create
+    fetchRLData({ isBackground: true });
   };
 
   const handleRightSideDataShow = (currentRegarding, currentDetails) => {
@@ -331,6 +350,9 @@ const App = () => {
     setRegarding(updatedRecord.Regarding || "No Regarding");
     setDetails(updatedRecord.History_Details_Plain || "No Details");
     setHighlightedRecordId(updatedRecord.id); // Highlight the updated record
+
+    // Background refetch after update
+    fetchRLData({ isBackground: true });
   };
 
   const filteredData = relatedListData

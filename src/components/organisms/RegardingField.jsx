@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { FormControl, InputLabel, Select, MenuItem, TextField, Box, Typography } from "@mui/material";
+import { FormControl, InputLabel, Select, MenuItem, TextField, Box } from "@mui/material";
 import { getRegardingOptions } from "./helperFunc";
 
 const RegardingField = ({ formData, handleInputChange, selectedRowData }) => {
@@ -26,7 +26,8 @@ const RegardingField = ({ formData, handleInputChange, selectedRowData }) => {
     if (existingValue !== "Other") {
       setShowManualInput(false); 
     }
-  }, [formData.type]); // ✅ Removed `selectedValue`
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync with formData.type; existingValue/predefinedOptions derived
+  }, [formData.type]);
   
 
   const handleSelectChange = (event) => {

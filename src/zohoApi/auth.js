@@ -2,7 +2,7 @@ const ZOHO = window.ZOHO;
 
 export async function resizeWindow({ height, width }) {
   try {
-    const resizeResp = await ZOHO.CRM.UI.Resize({ height, width });
+    await ZOHO.CRM.UI.Resize({ height, width });
   } catch (resizeWindowError) {
     console.log({ resizeWindowError });
   }
