@@ -325,15 +325,18 @@ export function Dialog({
         const historyId = createResponse.data[0].details.id;
         let createdRecords = [];
   
-        // Step 2: Upload attachment in parallel if it exists
-        if (formData?.attachment) {
+        // Step 2: Upload attachment if it exists and is a File object (new file selected)
+        if (formData?.attachment && formData.attachment instanceof File) {
           try {
             const fileResp = await zohoApi.file.uploadAttachment({
               module: "Applications_History",
               recordId: historyId,
-              data: formData?.attachment,
+              data: formData.attachment,
             });
             console.log({ fileResp });
+            if (fileResp.error) {
+              console.error("Error uploading attachment:", fileResp.error);
+            }
           } catch (error) {
             console.error("Error uploading attachment:", error);
           }
@@ -423,6 +426,32 @@ export function Dialog({
 
       if (updateResponse?.data[0]?.code === "SUCCESS") {
         const historyId = selectedRowData?.id;
+
+        // Upload attachment if a new file was selected (File object, not just metadata)
+        if (formData?.attachment && formData.attachment instanceof File) {
+          try {
+            // If there's an existing attachment, delete it first
+            if (loadedAttachmentFromRecord?.[0]?.id) {
+              await zohoApi.file.deleteAttachment({
+                module: "Applications_History",
+                recordId: historyId,
+                attachment_id: loadedAttachmentFromRecord[0].id,
+              });
+            }
+            // Upload the new attachment
+            const fileResp = await zohoApi.file.uploadAttachment({
+              module: "Applications_History",
+              recordId: historyId,
+              data: formData.attachment,
+            });
+            console.log({ fileResp });
+            if (fileResp.error) {
+              console.error("Error uploading attachment:", fileResp.error);
+            }
+          } catch (error) {
+            console.error("Error uploading attachment:", error);
+          }
+        }
 
         // Fetch related contacts from Applications_History
         const relatedRecordsResponse = await ZOHO.CRM.API.getRelatedRecords({

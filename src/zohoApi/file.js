@@ -10,19 +10,35 @@ const ZOHO = window.ZOHO;
 
 async function uploadAttachment({ module, recordId, data }) {
   try {
+    if (!data || !(data instanceof File)) {
+      return {
+        data: null,
+        error: "Invalid file data. Expected File object.",
+      };
+    }
+
     const uploadAttachmentResp = await ZOHO.CRM.API.attachFile({
       Entity: module,
       RecordID: recordId,
-      File: { Name: data?.name, Content: data },
+      File: { Name: data.name, Content: data },
     });
-    return {
-      data: uploadAttachmentResp?.data,
-      error: null,
-    };
+
+    if (uploadAttachmentResp?.data?.[0]?.code === "SUCCESS") {
+      return {
+        data: uploadAttachmentResp.data,
+        error: null,
+      };
+    } else {
+      return {
+        data: null,
+        error: uploadAttachmentResp?.data?.[0]?.details?.message || "Failed to upload attachment",
+      };
+    }
   } catch (uploadFileError) {
+    console.error("Upload attachment error:", uploadFileError);
     return {
       data: null,
-      error: "Something went wrong",
+      error: uploadFileError?.message || "Something went wrong",
     };
   }
 }
