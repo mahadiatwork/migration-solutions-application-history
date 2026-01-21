@@ -33,7 +33,6 @@ import { styled } from "@mui/material/styles";
 import { zohoApi } from "../../zohoApi";
 import ApplicationDialog from "./ApplicationTable";
 import Stakeholder from "../atoms/Stakeholder";
-import ApplicationField from "./ApplicationField";
 import { Close } from "@mui/icons-material";
 
 const VisuallyHiddenInput = styled("input")({
@@ -590,9 +589,6 @@ export function Dialog({
     "Vacation",
     "Other",
   ];
-
-  const [, setSelectedApplicationId] =
-    React.useState(null);
 
   const handleApplicationDialogClose = () => {
     setOpenApplicationDialog(false);

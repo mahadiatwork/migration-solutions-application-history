@@ -13,7 +13,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  IconButton,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 
@@ -26,7 +25,6 @@ const commonStyles = {
 };
 
 export default function ApplicationField({ handleInputChange, ZOHO, selectedApplication }) {
-  const [applications, setApplications] = useState([]);
   const [selectedApplications, setSelectedApplications] = useState(selectedApplication ? [selectedApplication] : []);
   const [searchType, setSearchType] = useState("Name");
   const [searchText, setSearchText] = useState("");
