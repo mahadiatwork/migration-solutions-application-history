@@ -142,11 +142,27 @@ const App = () => {
   const fetchRLData = async (options = {}) => {
     if (!module || !recordId) return;
     try {
-      const { data } = await zohoApi.record.getRecordsFromRelatedList({
-        module,
-        recordId,
-        RelatedListAPI: "Application_History",
-      });
+      let data = [];
+      if (module === "Applications" || module === "Application" || module === "Deals") {
+        try {
+          data = await zohoApi.record.fetchApplicationHistoryViaCoqlV8(recordId, 2000, 0);
+        } catch (coqlError) {
+          console.warn("COQL v8 failed, falling back to getRelatedRecords:", coqlError);
+          const resp = await zohoApi.record.getRecordsFromRelatedList({
+            module,
+            recordId,
+            RelatedListAPI: "Application_History",
+          });
+          data = resp?.data || [];
+        }
+      } else {
+        const resp = await zohoApi.record.getRecordsFromRelatedList({
+          module,
+          recordId,
+          RelatedListAPI: "Application_History",
+        });
+        data = resp?.data || [];
+      }
 
       const usersResponse = await ZOHO.CRM.API.getAllUsers({
         Type: "AllUsers",
@@ -155,6 +171,29 @@ const App = () => {
         (user) => user?.full_name && user?.id
       );
       setOwnerList(validUsers || []);
+
+      const getOwnerDisplayName = (owner, users) => {
+        if (owner == null) return "Unknown Owner";
+        if (typeof owner === "string") {
+          const u = users?.find((x) => x.id === owner);
+          return u?.full_name || owner;
+        }
+        const name =
+          owner.name ||
+          owner.full_name ||
+          owner.Name ||
+          owner.Full_Name ||
+          (owner.first_name && owner.last_name
+            ? `${owner.first_name} ${owner.last_name}`.trim()
+            : null);
+        if (name) return name;
+        const ownerId = owner.id ?? owner.Id;
+        if (ownerId && users?.length) {
+          const u = users.find((x) => x.id === ownerId);
+          return u?.full_name || "Unknown Owner";
+        }
+        return "Unknown Owner";
+      };
 
       const currentUserResponse = await ZOHO.CRM.CONFIG.getCurrentUser();
       setLoggedInUser(currentUserResponse?.users?.[0] || null);
@@ -173,31 +212,39 @@ const App = () => {
       }
 
 
-      const tempData = data?.map((obj) => ({
-        name: obj?.Name || "No Name",
-        id: obj?.id,
-        date_time: obj?.Date,
-        type: obj?.History_Type || "Unknown Type",
-        result: obj?.History_Result || "No Result",
-        duration: obj?.Duration_Min || "N/A",
-        regarding: obj?.Regarding || "No Regarding",
-        details: obj?.History_Details || "No Details",
-        icon: <DownloadIcon />,
-        ownerName: obj?.Owner?.name || "Unknown Owner",
-        stakeHolder: (() => {
+      const preserveFields = options?.preserveFieldsForRecordId;
+      const tempData = data?.map((obj) => {
+        const mappedStakeHolder = (() => {
           const flatId = obj["Contact_History_Info.Stakeholder.id"];
           const flatName = obj["Contact_History_Info.Stakeholder.Account_Name"];
           const nested = obj["Contact_History_Info.Stakeholder"];
-          const junction = obj?.Stakeholder; // if lookup is on the junction record
+          const junction = obj?.Stakeholder; // COQL or junction record
 
           const id = flatId ?? (nested && typeof nested === "object" ? nested.id : undefined) ?? (junction && typeof junction === "object" ? junction.id : undefined);
           const rawName = flatName ?? (nested && typeof nested === "object" ? (nested.Account_Name ?? nested.name) : undefined) ?? (junction && typeof junction === "object" ? (junction.Account_Name ?? junction.name) : undefined);
 
           return id !== null && id !== undefined ? { id, name: rawName || "" } : null;
-        })(),
-        // Participants:
-        currentData: currentModuleData
-      }));
+        })();
+        const item = {
+          name: obj?.Name || "No Name",
+          id: obj?.id,
+          date_time: obj?.Date,
+          type: obj?.History_Type || "Unknown Type",
+          result: obj?.History_Result || "No Result",
+          duration: obj?.Duration_Min || "N/A",
+          regarding: obj?.Regarding || "No Regarding",
+          details: obj?.History_Details || "No Details",
+          icon: <DownloadIcon />,
+          ownerName: getOwnerDisplayName(obj?.Owner, validUsers),
+          stakeHolder: mappedStakeHolder,
+          currentData: currentModuleData
+        };
+        // Preserve locally-updated fields when refetching after edit (COQL doesn't return Stakeholder)
+        if (preserveFields?.id === obj?.id && preserveFields?.stakeHolder != null) {
+          item.stakeHolder = preserveFields.stakeHolder;
+        }
+        return item;
+      });
 
       setRelatedListData(tempData || []);
       
@@ -311,11 +358,11 @@ const App = () => {
   };
 
   const handleRecordUpdate = (updatedRecord) => {
-
-
-    const updatedHistoryName = selectedParticipants
-    .map((c) => c.Full_Name)
-    .join(", ");
+    const participants = updatedRecord?.Participants ?? selectedParticipants ?? [];
+    const updatedHistoryName = participants
+      .map((c) => c?.Full_Name ?? c?.name)
+      .filter(Boolean)
+      .join(", ");
 
     // Normalize updatedRecord keys to match relatedListData keys
     const normalizedRecord = {
@@ -351,46 +398,69 @@ const App = () => {
     setDetails(updatedRecord.History_Details_Plain || "No Details");
     setHighlightedRecordId(updatedRecord.id); // Highlight the updated record
 
-    // Background refetch after update
-    fetchRLData({ isBackground: true });
+    // Background refetch after update; preserve stakeHolder (COQL doesn't return it)
+    fetchRLData({
+      isBackground: true,
+      preserveFieldsForRecordId: {
+        id: updatedRecord.id,
+        stakeHolder: normalizedRecord.stakeHolder,
+      },
+    });
   };
 
-  const filteredData = relatedListData
-    ?.filter((el) =>
-      selectedOwner ? el.ownerName === selectedOwner?.full_name : true
-    )
-    ?.filter((el) => (selectedType ? el?.type === selectedType : true))
-    ?.filter((el) => {
-      if (dateRange?.preDay) {
-        const isValidDate = dayjs(el?.date_time).isValid();
-        return isValidDate && isInLastNDays(el?.date_time, dateRange?.preDay);
-      }
-
-      if (dateRange?.startDate && dateRange?.endDate) {
+  const filteredData = React.useMemo(() => {
+    if (!relatedListData?.length) return [];
+    return relatedListData
+      .filter((el) =>
+        selectedOwner ? el.ownerName === selectedOwner?.full_name : true
+      )
+      .filter((el) => (selectedType ? el?.type === selectedType : true))
+      .filter((el) => {
+        if (dateRange?.preDay) {
+          const isValidDate = dayjs(el?.date_time).isValid();
+          return isValidDate && isInLastNDays(el?.date_time, dateRange.preDay);
+        }
+        if (dateRange?.startDate && dateRange?.endDate) {
+          const rowDate = dayjs(el?.date_time);
+          const start = dayjs(dateRange.startDate).startOf("day");
+          const end = dayjs(dateRange.endDate).endOf("day");
+          return rowDate.isBetween(start, end, null, "[]");
+        }
+        if (dateRange?.custom) {
+          const startDate = dayjs(dateRange.custom());
+          const endDate = dayjs();
+          return dayjs(el?.date_time).isBetween(startDate, endDate, null, "[]");
+        }
+        return true;
+      })
+      .filter((el) => {
+        if (!keyword?.trim()) return true;
+        const kw = keyword.trim().toLowerCase();
         return (
-          dayjs(el?.date_time).isAfter(dayjs(dateRange.startDate), "day") &&
-          dayjs(el?.date_time).isBefore(dayjs(dateRange.endDate), "day")
+          el.name?.toLowerCase().includes(kw) ||
+          el.details?.toLowerCase().includes(kw) ||
+          el.regarding?.toLowerCase().includes(kw)
         );
-      }
+      });
+  }, [relatedListData, selectedOwner, selectedType, dateRange, keyword]);
 
-      if (dateRange?.custom) {
-        const startDate = dayjs(dateRange.custom());
-        const endDate = dayjs();
-        return dayjs(el?.date_time).isBetween(startDate, endDate, null, "[]");
-      }
-      return true; // Show all if no date range is selected
-    })
-    ?.filter((el) => {
-      if (keyword.trim()) {
-        const lowerCaseKeyword = keyword.trim().toLowerCase();
-        return (
-          el.name?.toLowerCase().includes(lowerCaseKeyword) ||
-          el.details?.toLowerCase().includes(lowerCaseKeyword) ||
-          el.regarding?.toLowerCase().includes(lowerCaseKeyword)
-        );
-      }
-      return true; // Show all if no keyword is entered
-    });
+  const getActiveFilterNames = () => {
+    const active = [];
+    if (dateRange?.preDay || dateRange?.startDate || dateRange?.custom) active.push("Date");
+    if (selectedType) active.push("Type");
+    if (selectedOwner) active.push("User");
+    if (keyword?.trim()) active.push("Keyword");
+    return active;
+  };
+
+  const handleClearFilters = () => {
+    setDateRange(dateOptions[0]);
+    setSelectedType(null);
+    setSelectedOwner(null);
+    setKeyword("");
+    setCustomRange({ startDate: null, endDate: null });
+    setIsCustomRangeDialogOpen(false);
+  };
 
   const [applications, setApplications] = React.useState([]);
   const [openApplicationDialog, setOpenApplicationDialog] =
@@ -452,8 +522,33 @@ const App = () => {
             >
               <Autocomplete
                 size="small"
-                options={dateOptions}
+                options={
+                  dateRange?.startDate && dateRange?.endDate
+                    ? [...dateOptions, dateRange]
+                    : dateOptions
+                }
                 value={dateRange}
+                getOptionLabel={(option) => {
+                  if (!option) return "";
+                  if (option?.label) return option.label;
+                  if (option?.startDate && option?.endDate) {
+                    const start = dayjs(option.startDate).format("DD/MM/YYYY");
+                    const end = dayjs(option.endDate).format("DD/MM/YYYY");
+                    return `Custom: ${start} - ${end}`;
+                  }
+                  return "";
+                }}
+                isOptionEqualToValue={(option, value) => {
+                  if (!option || !value) return false;
+                  if (option?.label && value?.label) return option.label === value.label;
+                  if (option?.startDate && value?.startDate) {
+                    return (
+                      dayjs(option.startDate).isSame(dayjs(value.startDate), "day") &&
+                      dayjs(option.endDate).isSame(dayjs(value.endDate), "day")
+                    );
+                  }
+                  return false;
+                }}
                 sx={{
                   "& .MuiInputBase-root": {
                     height: "33px",
@@ -596,6 +691,18 @@ const App = () => {
               </Button>
             </Grid>
             <Grid item xs={9}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, fontSize: "9pt" }}>
+                <span>Total Records {filteredData?.length ?? 0}</span>
+                {getActiveFilterNames().length > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>Filter By: {getActiveFilterNames().join(", ")}</span>
+                    <Button size="small" onClick={handleClearFilters} sx={{ ml: 1, fontSize: "9pt" }}>
+                      Clear Filters
+                    </Button>
+                  </>
+                )}
+              </Box>
               <Table
                 rows={filteredData}
                 setSelectedRecordId={setSelectedRecordId}
@@ -652,7 +759,33 @@ const App = () => {
             >
               <Autocomplete
                 size="small"
-                options={dateOptions}
+                options={
+                  dateRange?.startDate && dateRange?.endDate
+                    ? [...dateOptions, dateRange]
+                    : dateOptions
+                }
+                value={dateRange}
+                getOptionLabel={(option) => {
+                  if (!option) return "";
+                  if (option?.label) return option.label;
+                  if (option?.startDate && option?.endDate) {
+                    const start = dayjs(option.startDate).format("DD/MM/YYYY");
+                    const end = dayjs(option.endDate).format("DD/MM/YYYY");
+                    return `Custom: ${start} - ${end}`;
+                  }
+                  return "";
+                }}
+                isOptionEqualToValue={(option, value) => {
+                  if (!option || !value) return false;
+                  if (option?.label && value?.label) return option.label === value.label;
+                  if (option?.startDate && value?.startDate) {
+                    return (
+                      dayjs(option.startDate).isSame(dayjs(value.startDate), "day") &&
+                      dayjs(option.endDate).isSame(dayjs(value.endDate), "day")
+                    );
+                  }
+                  return false;
+                }}
                 sx={{
                   "& .MuiInputBase-root": {
                     height: "33px",
@@ -665,7 +798,13 @@ const App = () => {
                 renderInput={(params) => (
                   <TextField {...params} label="Dates" size="small" />
                 )}
-                onChange={(e, value) => setDateRange(value)}
+                onChange={(e, value) => {
+                  if (value?.customRange) {
+                    setIsCustomRangeDialogOpen(true);
+                  } else {
+                    setDateRange(value);
+                  }
+                }}
               />
               <Autocomplete
                 size="small"
