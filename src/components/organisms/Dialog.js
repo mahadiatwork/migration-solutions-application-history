@@ -161,7 +161,12 @@ export function Dialog({
           Participants: selectedRowData?.Participants || [],
           result: selectedRowData?.result || "Meeting Held",
           type: selectedRowData?.type || "Meeting",
-          duration: selectedRowData?.duration || "60",
+          duration: (() => {
+            const d = selectedRowData?.duration;
+            if (d == null || d === "N/A" || d === "") return 60;
+            const n = Number(d);
+            return Number.isFinite(n) ? n : 60;
+          })(),
           regarding: selectedRowData?.regarding || "",
           details: selectedRowData?.details || "",
           stakeHolder: (selectedRowData?.stakeHolder && typeof selectedRowData.stakeHolder === "object" && selectedRowData.stakeHolder?.id !== null && selectedRowData.stakeHolder?.id !== undefined)
@@ -827,12 +832,15 @@ export function Dialog({
 
             <Grid item xs={6}>
               <Autocomplete
+                freeSolo
                 options={durationOptions}
-                getOptionLabel={(option) => option.toString()}
-                value={formData?.duration || null} // Provide a fallback value
-                onChange={(event, newValue) =>
-                  handleInputChange("duration", newValue)
-                }
+                getOptionLabel={(option) => (option != null ? option.toString() : "")}
+                value={formData?.duration != null ? Number(formData.duration) : null}
+                isOptionEqualToValue={(option, value) => option === value || Number(option) === Number(value)}
+                onChange={(event, newValue) => {
+                  const val = typeof newValue === "string" ? Number(newValue) || null : newValue;
+                  handleInputChange("duration", val);
+                }}
                 renderInput={(params) => (
                   <TextField
                     {...params}

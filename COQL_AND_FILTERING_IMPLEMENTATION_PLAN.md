@@ -76,6 +76,61 @@ LIMIT {offset}, {limit}
 
 **Deluge verification:** The above query was tested in Deluge with `applicationId = "76775000007812292"` and returned data successfully. The connection `zoho_crm_conn` and URL `https://www.zohoapis.com.au/crm/v8/coql` are confirmed working.
 
+---
+
+### Post-Implementation Issues & Resolutions
+
+The following issues were encountered after the initial COQL implementation and were resolved as described below.
+
+#### Issue 1: Record Owner showing "Unknown Owner"
+
+**Problem:** The "Record Owner" column displayed "Unknown Owner" for all records, even though owner data exists in Zoho.
+
+**Root cause:** When selecting `Owner` in COQL, the Zoho API often returns only `{ "id": "xxx" }` without `name` or `full_name`. The docs state: *"When you query a lookup field, the response only contains the ID of the field."*
+
+**Fix:** Added a `getOwnerDisplayName(owner, users)` helper in `App.js` that:
+- Handles multiple Owner shapes: `name`, `full_name`, `Name`, `Full_Name`, or `first_name` + `last_name`
+- When Owner is only `{ id }` or a string ID, looks up the user in `validUsers` (from `getAllUsers`) and returns their `full_name`
+- Falls back to `"Unknown Owner"` only when no match is found
+
+#### Issue 2: Stakeholder not showing when reopening the edit popup
+
+**Problem:** After updating the stakeholder in the edit dialog and saving, the update was persisted to Zoho. But when reopening the popup, the stakeholder field still showed the old value.
+
+**Root cause:** `handleRecordUpdate` correctly updated `relatedListData` with the new `stakeHolder`. However, it then called `fetchRLData({ isBackground: true })`, which refetched data from COQL. The COQL query does **not** include `Stakeholder` (it causes COQL to fail), so the refetched records had `stakeHolder: null`. This overwrote the locally updated data.
+
+**Fix:** Added `preserveFieldsForRecordId` support to `fetchRLData`:
+- When refetching after an edit, pass `{ id: updatedRecord.id, stakeHolder: normalizedRecord.stakeHolder }`
+- During row mapping, if a row's `id` matches and preserved `stakeHolder` is provided, use it instead of the API-mapped value (which would be null from COQL)
+
+#### Issue 3: Duration not showing in table or edit dialog
+
+**Problem:** The "Duration" column showed "N/A" for all records, and the "Duration (Min)" field in the edit dialog also showed "N/A" instead of the actual value.
+
+**Root cause:**
+1. **COQL query:** The COQL query did not include `Duration_Min`. The original plan said it was unsupported, but Zoho's COQL docs indicate numeric fields are supported.
+2. **Dialog handling:** The Duration Autocomplete expects numeric options (10, 20, 30, …). When `duration` was `"N/A"` or a string like `"60"`, it didn't match any option and displayed incorrectly.
+
+**Fix:**
+1. **`record.js`:** Added `Duration_Min` to the COQL SELECT query. If this causes COQL to fail, the app falls back to `getRecordsFromRelatedList`, which returns full records including `Duration_Min`.
+2. **`App.js`:** Updated duration mapping to handle `0` correctly: `(obj?.Duration_Min != null && String(obj.Duration_Min).trim() !== "") ? obj.Duration_Min : "N/A"`.
+3. **`Dialog.js`:** 
+   - Parse `selectedRowData.duration` to a number when initializing the form (handles `"N/A"`, `null`, and numeric strings)
+   - Added `freeSolo` so custom durations (e.g. 45) display even when not in the preset options
+   - Added `isOptionEqualToValue` for robust string/number comparison
+
+**Updated COQL query (current):**
+```sql
+SELECT Name, id, Date, History_Type, History_Result, Regarding, History_Details, Owner, Duration_Min
+FROM Applications_History
+WHERE Application = '{recordId}'
+LIMIT {offset}, {limit}
+```
+
+**Note:** `Stakeholder` remains excluded from the COQL query as it causes the query to fail. Use `preserveFieldsForRecordId` when refetching after a stakeholder update.
+
+---
+
 ### 1.3 Implementation Steps
 
 #### Step 1: Add COQL v8 Fetch Helper

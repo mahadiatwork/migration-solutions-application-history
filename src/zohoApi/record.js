@@ -14,8 +14,8 @@ export async function fetchApplicationHistoryViaCoqlV8(
   limit = 2000,
   offset = 0
 ) {
-  // Verified working in Deluge: do NOT include Duration_Min, Stakeholder, Owner.name, Owner.id
-  const selectQuery = `SELECT Name, id, Date, History_Type, History_Result, Regarding, History_Details, Owner FROM Applications_History WHERE Application = '${applicationId}' LIMIT ${offset}, ${limit}`;
+  // Verified working in Deluge: do NOT include Stakeholder, Owner.name, Owner.id
+  const selectQuery = `SELECT Name, id, Date, History_Type, History_Result, Regarding, History_Details, Owner, Duration_Min FROM Applications_History WHERE Application = '${applicationId}' LIMIT ${offset}, ${limit}`;
 
   const req_data = {
     url: `${dataCenterMap.AU}/crm/v8/coql`,

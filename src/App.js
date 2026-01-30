@@ -231,7 +231,7 @@ const App = () => {
           date_time: obj?.Date,
           type: obj?.History_Type || "Unknown Type",
           result: obj?.History_Result || "No Result",
-          duration: obj?.Duration_Min || "N/A",
+          duration: (obj?.Duration_Min != null && String(obj.Duration_Min).trim() !== "") ? obj.Duration_Min : "N/A",
           regarding: obj?.Regarding || "No Regarding",
           details: obj?.History_Details || "No Details",
           icon: <DownloadIcon />,
