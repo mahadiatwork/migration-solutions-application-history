@@ -75,6 +75,7 @@ const App = () => {
   const [openEditDialog, setOpenEditDialog] = React.useState(false);
   const [openCreateDialog, setOpenCreateDialog] = React.useState(false);
   const [ownerList, setOwnerList] = React.useState([]);
+  // Owner filter: no default (do not filter by logged-in user); user selects manually when needed
   const [selectedOwner, setSelectedOwner] = React.useState(null);
   const [typeList, setTypeList] = React.useState([]);
   const [selectedType, setSelectedType] = React.useState(null);
