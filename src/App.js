@@ -169,7 +169,10 @@ const App = () => {
         Type: "AllUsers",
       });
       const validUsers = usersResponse?.users?.filter(
-        (user) => user?.full_name && user?.id
+        (user) =>
+          user?.full_name &&
+          user?.id &&
+          (user?.status === "active" || user?.status === undefined)
       );
       setOwnerList(validUsers || []);
 
