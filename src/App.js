@@ -75,6 +75,8 @@ const App = () => {
   const [openEditDialog, setOpenEditDialog] = React.useState(false);
   const [openCreateDialog, setOpenCreateDialog] = React.useState(false);
   const [ownerList, setOwnerList] = React.useState([]);
+  // All users (active + inactive) for filter dropdown and resolving owner names in table
+  const [allUsersList, setAllUsersList] = React.useState([]);
   // Owner filter: no default (do not filter by logged-in user); user selects manually when needed
   const [selectedOwner, setSelectedOwner] = React.useState(null);
   const [typeList, setTypeList] = React.useState([]);
@@ -168,13 +170,14 @@ const App = () => {
       const usersResponse = await ZOHO.CRM.API.getAllUsers({
         Type: "AllUsers",
       });
-      const validUsers = usersResponse?.users?.filter(
-        (user) =>
-          user?.full_name &&
-          user?.id &&
-          (user?.status === "active" || user?.status === undefined)
+      const allUsersForFilter = usersResponse?.users?.filter(
+        (user) => user?.full_name && user?.id
       );
-      setOwnerList(validUsers || []);
+      const activeUsersForAssignment = (allUsersForFilter || []).filter(
+        (user) => user?.status === "active" || user?.status === undefined
+      );
+      setAllUsersList(allUsersForFilter || []);
+      setOwnerList(activeUsersForAssignment || []);
 
       const getOwnerDisplayName = (owner, users) => {
         if (owner == null) return "Unknown Owner";
@@ -239,7 +242,7 @@ const App = () => {
           regarding: obj?.Regarding || "No Regarding",
           details: obj?.History_Details || "No Details",
           icon: <DownloadIcon />,
-          ownerName: getOwnerDisplayName(obj?.Owner, validUsers),
+          ownerName: getOwnerDisplayName(obj?.Owner, allUsersForFilter),
           stakeHolder: mappedStakeHolder,
           currentData: currentModuleData
         };
@@ -469,30 +472,110 @@ const App = () => {
   const [applications, setApplications] = React.useState([]);
   const [openApplicationDialog, setOpenApplicationDialog] =
     React.useState(false);
+  const [contacts, setContacts] = React.useState([]);
+  const [openContactDialog, setOpenContactDialog] = React.useState(false);
 
   const handleMoveToApplication = async () => {
     try {
-      // Fetch related applications for the current contact
+      // Fetch related applications for the current contact / account
+      const entityName = module === "Contacts" || module === "Contact" ? "Contacts" : "Accounts";
       const response = await ZOHO.CRM.API.getRelatedRecords({
-        Entity: "Accounts",
-        RecordID: currentModuleData?.id,
+        Entity: entityName,
+        RecordID: currentModuleData?.id || recordId,
         RelatedList: "Applications",
         page: 1,
         per_page: 200,
       });
-      if (response?.data) {
+      if (response?.data && response.data.length > 0) {
         setApplications(response.data || []);
         setOpenApplicationDialog(true); // Open the application selection dialog
       } else {
-        throw new Error("No related applications found.");
+        enqueueSnackbar("No related applications found.", { variant: "warning" });
       }
     } catch (error) {
       console.error("Error fetching related applications:", error);
-      // setSnackbar({
-      //   open: true,
-      //   message: "Failed to fetch related applications.",
-      //   severity: "error",
-      // });
+      enqueueSnackbar("Failed to fetch related applications.", { variant: "error" });
+    }
+  };
+
+  const handleMoveToContact = async () => {
+    try {
+      let candidateContacts = [];
+
+      // 1. Primary contact from currentModuleData
+      if (currentModuleData?.Contact_Name?.id) {
+        candidateContacts.push({
+          id: currentModuleData.Contact_Name.id,
+          Full_Name: currentModuleData.Contact_Name.name || "Primary Contact",
+          First_Name: currentModuleData.Contact_Name.name?.split(" ")[0] || "N/A",
+          Last_Name: currentModuleData.Contact_Name.name?.split(" ").slice(1).join(" ") || "N/A",
+          Email: "N/A",
+          Mobile: "N/A",
+          ID_Number: "N/A",
+        });
+      }
+
+      // 2. Participants associated with the selected history row
+      if (selectedParticipants?.length > 0) {
+        selectedParticipants.forEach((p) => {
+          if (p?.id) {
+            candidateContacts.push({
+              id: p.id,
+              Full_Name: p.Full_Name || `${p.First_Name || ""} ${p.Last_Name || ""}`.trim() || p.name || "Unknown",
+              First_Name: p.First_Name || "N/A",
+              Last_Name: p.Last_Name || "N/A",
+              Email: p.Email || "No Email",
+              Mobile: p.Mobile || "N/A",
+              ID_Number: p.ID_Number || "N/A",
+            });
+          }
+        });
+      }
+
+      // 3. Fetch related contacts for this Application from CRM
+      if (recordId && ZOHO) {
+        try {
+          const resp = await ZOHO.CRM.API.getRelatedRecords({
+            Entity: module || "Applications",
+            RecordID: recordId,
+            RelatedList: "Contacts",
+            page: 1,
+            per_page: 200,
+          });
+
+          if (resp?.data && Array.isArray(resp.data)) {
+            resp.data.forEach((c) => {
+              if (c?.id) {
+                candidateContacts.push({
+                  id: c.id,
+                  Full_Name: `${c.First_Name || ""} ${c.Last_Name || ""}`.trim() || c.Full_Name || c.name || "Unknown",
+                  First_Name: c.First_Name || "N/A",
+                  Last_Name: c.Last_Name || "N/A",
+                  Email: c.Email || "No Email",
+                  Mobile: c.Mobile || "N/A",
+                  ID_Number: c.ID_Number || "N/A",
+                });
+              }
+            });
+          }
+        } catch (relError) {
+          console.warn("Could not fetch related contacts for module:", relError);
+        }
+      }
+
+      // Deduplicate contacts by id
+      const uniqueContactsMap = new Map();
+      candidateContacts.forEach((c) => {
+        if (c.id && !uniqueContactsMap.has(c.id)) {
+          uniqueContactsMap.set(c.id, c);
+        }
+      });
+
+      setContacts(Array.from(uniqueContactsMap.values()));
+      setOpenContactDialog(true);
+    } catch (error) {
+      console.error("Error preparing move to contact:", error);
+      enqueueSnackbar("Error fetching contacts for move.", { variant: "error" });
     }
   };
 
@@ -536,8 +619,8 @@ const App = () => {
                   if (!option) return "";
                   if (option?.label) return option.label;
                   if (option?.startDate && option?.endDate) {
-                    const start = dayjs(option.startDate).format("DD/MM/YYYY");
-                    const end = dayjs(option.endDate).format("DD/MM/YYYY");
+                    const start = dayjs(option.startDate).format("DD-MM-YYYY");
+                    const end = dayjs(option.endDate).format("DD-MM-YYYY");
                     return `Custom: ${start} - ${end}`;
                   }
                   return "";
@@ -644,7 +727,7 @@ const App = () => {
               />
               <Autocomplete
                 size="small"
-                options={ownerList || []}
+                options={allUsersList || []}
                 getOptionLabel={(option) => option?.full_name || "Unknown User"}
                 value={selectedOwner || null}
                 isOptionEqualToValue={(option, value) =>
@@ -773,8 +856,8 @@ const App = () => {
                   if (!option) return "";
                   if (option?.label) return option.label;
                   if (option?.startDate && option?.endDate) {
-                    const start = dayjs(option.startDate).format("DD/MM/YYYY");
-                    const end = dayjs(option.endDate).format("DD/MM/YYYY");
+                    const start = dayjs(option.startDate).format("DD-MM-YYYY");
+                    const end = dayjs(option.endDate).format("DD-MM-YYYY");
                     return `Custom: ${start} - ${end}`;
                   }
                   return "";
@@ -846,7 +929,7 @@ const App = () => {
               />
               <Autocomplete
                 size="small"
-                options={ownerList || []}
+                options={allUsersList || []}
                 getOptionLabel={(option) => option?.full_name || "Unknown User"}
                 value={selectedOwner || null}
                 isOptionEqualToValue={(option, value) =>
@@ -920,7 +1003,7 @@ const App = () => {
                           <TableCell>
                             {row.date_time
                               ? dayjs(row.date_time).format(
-                                  "DD/MM/YYYY HH:mm A"
+                                  "DD-MM-YYYY HH:mm A"
                                 )
                               : "No Date"}
                           </TableCell>
@@ -955,10 +1038,14 @@ const App = () => {
         selectedContacts={selectedContacts}
         setSelectedContacts={setSelectedContacts}
         buttonText="Update"
-        handleMoveToApplication={handleMoveToApplication}
+        handleMoveToApplication={module === "Contacts" || module === "Contact" ? handleMoveToApplication : undefined}
         applications={applications}
         openApplicationDialog={openApplicationDialog}
         setOpenApplicationDialog={setOpenApplicationDialog}
+        handleMoveToContact={handleMoveToContact}
+        contacts={contacts}
+        openContactDialog={openContactDialog}
+        setOpenContactDialog={setOpenContactDialog}
         currentModuleData={currentModuleData}
         selectedParticipants={selectedParticipants}
         setSelectedParticipants={setSelectedParticipants}
@@ -1003,6 +1090,7 @@ const App = () => {
                   onChange={(newValue) =>
                     setCustomRange((prev) => ({ ...prev, startDate: newValue }))
                   }
+                  format="DD-MM-YYYY"
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -1031,6 +1119,7 @@ const App = () => {
                   onChange={(newValue) =>
                     setCustomRange((prev) => ({ ...prev, endDate: newValue }))
                   }
+                  format="DD-MM-YYYY"
                   renderInput={(params) => (
                     <TextField
                       {...params}

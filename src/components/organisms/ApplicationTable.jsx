@@ -13,6 +13,7 @@ import {
   DialogActions,
   Snackbar,
   Alert,
+  CircularProgress,
 } from "@mui/material";
 
 
@@ -93,6 +94,7 @@ const ApplicationDialog = ({
   currentContact,
 }) => {
   const [selectedApplicationId, setSelectedApplicationId] = useState(null);
+  const [isMoving, setIsMoving] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
@@ -116,6 +118,7 @@ const ApplicationDialog = ({
       return;
     }
 
+    setIsMoving(true);
     try {
 
 
@@ -184,6 +187,7 @@ const ApplicationDialog = ({
         severity: "error",
       });
     } finally {
+      setIsMoving(false);
       handleApplicationDialogClose();
     }
   };
@@ -211,15 +215,18 @@ const ApplicationDialog = ({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleApplicationDialogClose} color="secondary">
+          <Button onClick={handleApplicationDialogClose} color="secondary" disabled={isMoving}>
             Cancel
           </Button>
           <Button
             onClick={() => handleApplicationSelect(currentContact)}
             color="primary"
-            disabled={!selectedApplicationId} // Disable if no application is selected
+            variant="contained"
+            disabled={!selectedApplicationId || isMoving}
+            sx={{ fontSize: "9pt", display: "flex", alignItems: "center", gap: 1 }}
           >
-            Move
+            {isMoving && <CircularProgress size={16} color="inherit" />}
+            {isMoving ? "Moving..." : "Move"}
           </Button>
         </DialogActions>
       </MUIDialog>

@@ -262,7 +262,7 @@ export function Table({
                           alignItems: "flex-start",
                         }}
                       >
-                        <span>{dayjs(row.date_time).format("DD/MM/YYYY")}</span>
+                        <span>{dayjs(row.date_time).format("DD-MM-YYYY")}</span>
                         <span>{dayjs(row.date_time).format("h:mm A")}</span>
                       </Box>
                     </TableCell>

@@ -32,6 +32,7 @@ import IconButton from "@mui/material/IconButton"; // For the clickable icon but
 import { styled } from "@mui/material/styles";
 import { zohoApi } from "../../zohoApi";
 import ApplicationDialog from "./ApplicationTable";
+import ContactDialog from "./ContactTable";
 import Stakeholder from "../atoms/Stakeholder";
 import { Close } from "@mui/icons-material";
 
@@ -89,6 +90,10 @@ export function Dialog({
   applications,
   openApplicationDialog,
   setOpenApplicationDialog,
+  handleMoveToContact,
+  contacts,
+  openContactDialog,
+  setOpenContactDialog,
   currentModuleData,
   selectedParticipants,
   setSelectedParticipants
@@ -793,7 +798,7 @@ export function Dialog({
                       onChange={(newValue) =>
                         handleInputChange("date_time", newValue || dayjs())
                       }
-                      format="DD/MM/YYYY hh:mm A"
+                      format="DD-MM-YYYY hh:mm A"
                       sx={{
                         // bgcolor: "green",
                         "& .MuiInputBase-input": {
@@ -1060,7 +1065,7 @@ export function Dialog({
           sx={{ display: "flex", justifyContent: "space-between" }}
         >
           {selectedRowData !== undefined ? (
-            <div>
+            <div style={{ display: "flex", gap: "8px" }}>
               <Button
                 onClick={handleDelete}
                 variant="outlined"
@@ -1068,27 +1073,42 @@ export function Dialog({
                 disabled={isSubmitting}
                 sx={{
                   fontSize: "9pt",
-                  marginLeft: "8px",
                   textTransform: "none",
                   padding: "4px 8px",
                 }}
               >
                 Delete
               </Button>
-              {/* <Button
-                onClick={handleMoveToApplication}
-                variant="outlined"
-                color="success"
-                disabled={isSubmitting}
-                sx={{
-                  fontSize: "9pt",
-                  marginLeft: "8px",
-                  textTransform: "none",
-                  padding: "4px 8px",
-                }}
-              >
-                Move to Application
-              </Button> */}
+              {handleMoveToContact && (
+                <Button
+                  onClick={handleMoveToContact}
+                  variant="outlined"
+                  color="success"
+                  disabled={isSubmitting}
+                  sx={{
+                    fontSize: "9pt",
+                    textTransform: "none",
+                    padding: "4px 8px",
+                  }}
+                >
+                  Move to Contact
+                </Button>
+              )}
+              {handleMoveToApplication && (
+                <Button
+                  onClick={handleMoveToApplication}
+                  variant="outlined"
+                  color="primary"
+                  disabled={isSubmitting}
+                  sx={{
+                    fontSize: "9pt",
+                    textTransform: "none",
+                    padding: "4px 8px",
+                  }}
+                >
+                  Move to Application
+                </Button>
+              )}
             </div>
           ) : (
             <div></div>
@@ -1125,6 +1145,17 @@ export function Dialog({
         historyContacts={historyContacts}
         selectedRowData={selectedRowData}
         currentContact={currentContact}
+      />
+      <ContactDialog
+        openContactDialog={openContactDialog}
+        handleContactDialogClose={() => setOpenContactDialog && setOpenContactDialog(false)}
+        contacts={contacts}
+        ZOHO={ZOHO}
+        handleDelete={handleDelete}
+        selectedRowData={selectedRowData}
+        onRecordMoved={(movedId) => {
+          if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
+        }}
       />
       <Snackbar
         open={snackbar.open}
