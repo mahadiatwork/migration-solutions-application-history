@@ -14,6 +14,10 @@ import timezone from "dayjs/plugin/timezone";
 
 import { useZohoInit } from "./hook/useZohoInit";
 import { zohoApi } from "./zohoApi";
+import {
+  fetchPicklistConfig,
+  getTypeOptionsFromConfig,
+} from "./services/picklistConfigService";
 import { Table } from "./components/organisms/Table";
 import { Dialog } from "./components/organisms/Dialog";
 import {
@@ -65,7 +69,7 @@ const dateOptions = [
 ];
 
 const App = () => {
-  const { module, recordId } = useZohoInit();
+  const { module, recordId, initZoho } = useZohoInit();
   const { enqueueSnackbar } = useSnackbar();
   const [initPageContent, setInitPageContent] = React.useState(
     <CircularProgress />
@@ -80,6 +84,7 @@ const App = () => {
   // Owner filter: no default (do not filter by logged-in user); user selects manually when needed
   const [selectedOwner, setSelectedOwner] = React.useState(null);
   const [typeList, setTypeList] = React.useState([]);
+  const [picklistConfig, setPicklistConfig] = React.useState(null);
   const [selectedType, setSelectedType] = React.useState(null);
   const [dateRange, setDateRange] = React.useState(dateOptions[0]);
   const [keyword, setKeyword] = React.useState("");
@@ -263,30 +268,17 @@ const App = () => {
         a.localeCompare(b)
       ); // Sort alphabetically
 
-      const additionalTypes = [
-        "Meeting",
-        "To-Do",
-        "Call",
-        "Appointment",
-        "Boardroom",
-        "Call Billing",
-        "Email Billing",
-        "Initial Consultation",
-        "Mail",
-        "Meeting Billing",
-        "Personal Activity",
-        "Room 1",
-        "Room 2",
-        "Room 3",
-        "Todo Billing",
-        "Vacation",
-      ]; // Example additional options
-
-      const sortedTypesWithAdditional = [
-        ...new Set([...additionalTypes, ...sortedTypes]), // Merge additional options with existing ones
-      ].sort((a, b) => a.localeCompare(b)); // Sort alphabetically
-
-      setTypeList(sortedTypesWithAdditional);
+      let config = picklistConfig;
+      try {
+        config = await fetchPicklistConfig();
+        setPicklistConfig(config);
+      } catch (configError) {
+        console.warn("Widget_Picklist_Config: failed during history load", configError);
+      }
+      const configTypes = getTypeOptionsFromConfig(config);
+      const extraTypes = sortedTypes.filter((t) => !configTypes.includes(t));
+      extraTypes.sort((a, b) => a.localeCompare(b));
+      setTypeList([...configTypes, ...extraTypes]);
 
       setInitPageContent(null);
     } catch (error) {
@@ -300,11 +292,33 @@ const App = () => {
   };
 
   React.useEffect(() => {
-    if (module && recordId) {
+    if (!initZoho) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const config = await fetchPicklistConfig();
+        if (cancelled) return;
+        setPicklistConfig(config);
+        const fromModule = getTypeOptionsFromConfig(config);
+        setTypeList((prev) => {
+          const extra = prev.filter((t) => !fromModule.includes(t));
+          return [...fromModule, ...extra];
+        });
+      } catch (configError) {
+        console.warn("Failed to load Widget_Picklist_Config:", configError);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initZoho]);
+
+  React.useEffect(() => {
+    if (initZoho && module && recordId) {
       fetchRLData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchRLData is stable, module and recordId are the only deps needed
-  }, [module, recordId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchRLData is stable; initZoho, module and recordId are the deps needed
+  }, [initZoho, module, recordId]);
 
   const [highlightedRecordId, setHighlightedRecordId] = React.useState(null);
 
@@ -516,8 +530,12 @@ const App = () => {
       }
 
       // 2. Participants associated with the selected history row
-      if (selectedParticipants?.length > 0) {
-        selectedParticipants.forEach((p) => {
+      const rowParticipants = [
+        ...(selectedParticipants || []),
+        ...(selectedContacts || []),
+      ];
+      if (rowParticipants.length > 0) {
+        rowParticipants.forEach((p) => {
           if (p?.id) {
             candidateContacts.push({
               id: p.id,
@@ -571,7 +589,15 @@ const App = () => {
         }
       });
 
-      setContacts(Array.from(uniqueContactsMap.values()));
+      const uniqueContacts = Array.from(uniqueContactsMap.values());
+      if (uniqueContacts.length === 0) {
+        enqueueSnackbar("No related contacts found for this application.", {
+          variant: "info",
+        });
+        return;
+      }
+
+      setContacts(uniqueContacts);
       setOpenContactDialog(true);
     } catch (error) {
       console.error("Error preparing move to contact:", error);
@@ -1049,6 +1075,7 @@ const App = () => {
         currentModuleData={currentModuleData}
         selectedParticipants={selectedParticipants}
         setSelectedParticipants={setSelectedParticipants}
+        picklistConfig={picklistConfig}
       />
       <Dialog
         openDialog={openCreateDialog}
@@ -1065,6 +1092,7 @@ const App = () => {
         currentModuleData={currentModuleData}
         selectedParticipants={selectedParticipants}
         setSelectedParticipants={setSelectedParticipants}
+        picklistConfig={picklistConfig}
       />
       {isCustomRangeDialogOpen && (
         <MUIDialog

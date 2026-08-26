@@ -2,9 +2,9 @@ import React, { useState, useEffect } from "react";
 import { FormControl, InputLabel, Select, MenuItem, TextField, Box } from "@mui/material";
 import { getRegardingOptions } from "./helperFunc";
 
-const RegardingField = ({ formData, handleInputChange, selectedRowData }) => {
+const RegardingField = ({ formData, handleInputChange, selectedRowData, picklistConfig }) => {
   const existingValue = selectedRowData?.regarding || formData.regarding;
-  const predefinedOptions = getRegardingOptions(formData.type, existingValue);
+  const predefinedOptions = getRegardingOptions(formData.type, existingValue, picklistConfig);
 
   const [selectedValue, setSelectedValue] = useState("");
   const [manualInput, setManualInput] = useState("");

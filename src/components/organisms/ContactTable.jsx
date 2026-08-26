@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import dayjs from "dayjs";
 import {
   Table,
   TableBody,
@@ -107,6 +108,31 @@ const ContactTable = ({
   );
 };
 
+const getContactId = (contact) =>
+  contact?.id || contact?.Contact?.id || null;
+
+const getContactName = (contact) =>
+  contact?.Full_Name ||
+  contact?.full_name ||
+  contact?.name ||
+  contact?.Contact?.name ||
+  `${contact?.First_Name || ""} ${contact?.Last_Name || ""}`.trim() ||
+  "";
+
+const formatMultiSelect = (value) => {
+  if (value == null || value === "") return null;
+  if (Array.isArray(value)) {
+    const joined = value.filter(Boolean).join(", ");
+    return joined || null;
+  }
+  return String(value);
+};
+
+const formatDuration = (value) => {
+  if (value == null || value === "" || value === "N/A") return null;
+  return String(value);
+};
+
 export const ContactDialog = ({
   openContactDialog,
   handleContactDialogClose,
@@ -114,6 +140,10 @@ export const ContactDialog = ({
   ZOHO,
   handleDelete,
   selectedRowData,
+  formData,
+  selectedOwner,
+  historyContacts = [],
+  currentModuleData,
   onRecordMoved,
 }) => {
   const [selectedContactId, setSelectedContactId] = useState(null);
@@ -210,7 +240,19 @@ export const ContactDialog = ({
       return;
     }
 
-    const selectedContact = displayContacts.find((c) => c.id === selectedContactId);
+    if (!selectedRowData?.id) {
+      setSnackbar({
+        open: true,
+        message: "History record data is missing. Please close and try again.",
+        severity: "error",
+      });
+      return;
+    }
+
+    const selectedContact =
+      displayContacts.find((c) => c.id === selectedContactId) ||
+      contacts.find((c) => c.id === selectedContactId);
+
     if (!selectedContact) {
       setSnackbar({
         open: true,
@@ -222,83 +264,176 @@ export const ContactDialog = ({
 
     setIsMoving(true);
     try {
-      const contactFullName =
-        selectedContact.Full_Name ||
-        `${selectedContact.First_Name || ""} ${selectedContact.Last_Name || ""}`.trim() ||
-        "Contact History";
+      const contactsToLink = new Map();
+      const addContact = (contact) => {
+        const id = getContactId(contact);
+        if (!id) return;
+        const key = String(id);
+        if (!contactsToLink.has(key)) {
+          contactsToLink.set(key, { ...contact, id: key });
+        }
+      };
 
-      // 1. Create a new record in History1 (Contact History)
-      const createContactHistory = await ZOHO.CRM.API.insertRecord({
-        Entity: "History1",
-        APIData: {
-          Name: contactFullName,
-          History_Details: selectedRowData?.details || selectedRowData?.History_Details || "",
-          History_Result: selectedRowData?.result || selectedRowData?.History_Result || "",
-          History_Type: selectedRowData?.type || selectedRowData?.History_Type || "",
-          Regarding: selectedRowData?.regarding || selectedRowData?.Regarding || "",
-          Duration_Min: selectedRowData?.duration != null && selectedRowData?.duration !== "N/A"
-            ? String(selectedRowData.duration)
-            : "",
-          Date: selectedRowData?.date_time || selectedRowData?.Date || new Date().toISOString(),
-          Stakeholder: selectedRowData?.stakeHolder
-            ? { id: selectedRowData.stakeHolder.id }
-            : null,
-          Owner: selectedRowData?.Owner ? { id: selectedRowData.Owner.id } : null,
-        },
-        Trigger: ["workflow"],
-      });
+      (Array.isArray(historyContacts) ? historyContacts : []).forEach(addContact);
+      (Array.isArray(formData?.Participants) ? formData.Participants : []).forEach(addContact);
+
+      try {
+        const relatedParticipants = await ZOHO.CRM.API.getRelatedRecords({
+          Entity: "Applications_History",
+          RecordID: selectedRowData.id,
+          RelatedList: "Contacts4",
+          page: 1,
+          per_page: 200,
+        });
+        (relatedParticipants?.data || []).forEach((record) => {
+          addContact({
+            id: record?.Contact?.id,
+            Full_Name: record?.Contact?.name,
+          });
+        });
+      } catch (relatedError) {
+        console.warn("Could not fetch Contacts4 participants for move:", relatedError);
+      }
+
+      addContact(selectedContact);
+
+      if (contactsToLink.size === 0) {
+        setSnackbar({
+          open: true,
+          message: "No contacts associated with this history. Please add at least one contact.",
+          severity: "error",
+        });
+        return;
+      }
+
+      const linkedContacts = Array.from(contactsToLink.values());
+      const joinedNames = linkedContacts
+        .map(getContactName)
+        .filter(Boolean)
+        .join(", ");
+      const historyName =
+        getContactName(selectedContact) || joinedNames || "Contact History";
+
+      const stakeHolder =
+        formData?.stakeHolder ??
+        formData?.stakeHolder ??
+        selectedRowData?.stakeHolder ??
+        selectedRowData?.stakeHolder;
+      const stakeholderId =
+        stakeHolder && typeof stakeHolder === "object"
+          ? stakeHolder.id ?? stakeHolder.Id ?? stakeHolder.ID
+          : null;
+      const stakeholderForApi =
+        stakeholderId != null ? { id: String(stakeholderId) } : null;
+
+      const ownerForApi = selectedOwner?.id
+        ? { id: selectedOwner.id }
+        : selectedRowData?.Owner?.id
+          ? { id: selectedRowData.Owner.id }
+          : null;
+
+      const dateValue = formData?.date_time ?? formData?.date_time ?? selectedRowData?.date_time;
+      const formattedDate = dateValue
+        ? dayjs(dateValue).format("YYYY-MM-DDTHH:mm:ssZ")
+        : null;
+
+      const apiData = {
+        Name: historyName,
+        History_Details_Plain: formData?.details ?? selectedRowData?.details ?? "",
+        History_Result: formData?.result ?? selectedRowData?.result ?? "",
+        History_Type: formData?.type ?? selectedRowData?.type ?? "",
+        Regarding: formData?.regarding ?? selectedRowData?.regarding ?? "",
+        Duration: formatDuration(formData?.duration ?? selectedRowData?.duration),
+        Date: formattedDate,
+        Stakeholder: stakeholderForApi,
+        ...(ownerForApi ? { Owner: ownerForApi } : {}),
+      };
+
+      const currentApplicationId = currentModuleData?.id;
+      const matterFields = currentApplicationId
+        ? {
+            Matter: { id: currentApplicationId },
+            Matter_No: currentModuleData?.Name || null,
+            Current_Stage: currentModuleData?.Current_Stage || null,
+            Matter_Progress: formatMultiSelect(currentModuleData?.Matter_Progress),
+          }
+        : {};
+
+      const insertHistory1 = (payload) =>
+        ZOHO.CRM.API.insertRecord({
+          Entity: "History1",
+          APIData: payload,
+          Trigger: ["workflow"],
+        });
+
+      let createContactHistory = await insertHistory1({ ...apiData, ...matterFields });
+      if (
+        createContactHistory?.data?.[0]?.code !== "SUCCESS" &&
+        Object.keys(matterFields).length > 0
+      ) {
+        createContactHistory = await insertHistory1(apiData);
+      }
 
       if (createContactHistory?.data?.[0]?.code === "SUCCESS") {
         const newHistoryId = createContactHistory.data[0].details.id;
 
-        // 2. Insert junction record in History_X_Contacts linking to the selected Contact
-        try {
-          await ZOHO.CRM.API.insertRecord({
-            Entity: "History_X_Contacts",
-            APIData: {
-              Contact_History_Info: { id: newHistoryId },
-              Contact_Details: { id: selectedContact.id },
-              Stakeholder: selectedRowData?.stakeHolder
-                ? { id: selectedRowData.stakeHolder.id }
-                : null,
-            },
-            Trigger: ["workflow"],
-          });
-        } catch (juncError) {
-          console.error(`Error inserting History_X_Contacts for contact ID ${selectedContact.id}:`, juncError);
+        for (const contact of linkedContacts) {
+          const contactId = getContactId(contact);
+          if (!contactId) continue;
+          try {
+            await ZOHO.CRM.API.insertRecord({
+              Entity: "History_X_Contacts",
+              APIData: {
+                Contact_History_Info: { id: newHistoryId },
+                Contact_Details: { id: contactId },
+              },
+              Trigger: ["workflow"],
+            });
+          } catch (juncError) {
+            console.error(
+              `Error inserting History_X_Contacts for contact ID ${contactId}:`,
+              juncError
+            );
+          }
         }
 
-        // 3. Copy attachments from Applications_History to History1
-        var func_name = "copy_attachment_form_contact_history_to_applicatio";
-        var req_data = {
-          arguments: JSON.stringify({
-            fromModule: "Applications_History",
-            toModule: "History1",
-            fromID: selectedRowData?.id,
-            ToID: newHistoryId,
-          }),
-        };
-
+        let attachmentWarning = false;
         try {
-          await ZOHO.CRM.FUNCTIONS.execute(func_name, req_data);
+          await ZOHO.CRM.FUNCTIONS.execute(
+            "copy_attachment_form_contact_history_to_applicatio",
+            {
+              arguments: JSON.stringify({
+                fromModule: "Applications_History",
+                toModule: "History1",
+                fromID: selectedRowData.id,
+                ToID: newHistoryId,
+              }),
+            }
+          );
         } catch (funcError) {
+          attachmentWarning = true;
           console.warn("Attachment copy function warning/error:", funcError);
         }
 
-        // 4. Delete the original Applications_History record and its junction records
         await handleDelete();
 
         setSnackbar({
           open: true,
-          message: "History moved to Contact successfully!",
-          severity: "success",
+          message: attachmentWarning
+            ? "History moved to Contact, but attachments may be missing."
+            : "History moved to Contact successfully!",
+          severity: attachmentWarning ? "warning" : "success",
         });
 
         if (onRecordMoved) {
-          onRecordMoved(selectedRowData?.id);
+          onRecordMoved(selectedRowData.id);
         }
+
+        handleContactDialogClose();
       } else {
-        const errMsg = createContactHistory?.data?.[0]?.message || "Failed to create Contact history.";
+        const errMsg =
+          createContactHistory?.data?.[0]?.message ||
+          "Failed to create Contact history.";
         throw new Error(errMsg);
       }
     } catch (error) {
@@ -310,7 +445,6 @@ export const ContactDialog = ({
       });
     } finally {
       setIsMoving(false);
-      handleContactDialogClose();
     }
   };
 
@@ -318,7 +452,7 @@ export const ContactDialog = ({
     <>
       <MUIDialog
         open={openContactDialog}
-        onClose={handleContactDialogClose}
+        onClose={isMoving ? undefined : handleContactDialogClose}
         PaperProps={{
           sx: {
             minWidth: "600px",
@@ -328,7 +462,25 @@ export const ContactDialog = ({
           },
         }}
       >
-        <DialogContent>
+        <DialogContent sx={{ position: "relative" }}>
+          {isMoving && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "rgba(255, 255, 255, 0.8)",
+                zIndex: 1,
+              }}
+            >
+              <CircularProgress size={48} />
+            </Box>
+          )}
           <Box display="flex" gap={2} mb={2}>
             <TextField
               select

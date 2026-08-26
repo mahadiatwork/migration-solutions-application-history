@@ -9,6 +9,26 @@ export const dataCenterMap = {
 
 export const conn_name = "zoho_crm_conn";
 
+// Widget_Picklist_Config — one CRM record = one Type / Result / Regarding / Duration option.
+// If the API name is rejected as INVALID_MODULE, retry CustomModule15.
+export const PICKLIST_CONFIG_MODULE = "Widget_Picklist_Config";
+export const PICKLIST_CONFIG_MODULE_FALLBACK = "CustomModule15";
+
+export const PICKLIST_CONFIG_FIELDS = {
+  name: "Name",
+  category: "Category",
+  parentType: "Parent_Type",
+  sortOrder: "Sort_Order",
+  active: "Active",
+};
+
+export const PICKLIST_CATEGORIES = {
+  TYPE: "Type",
+  RESULT: "Result",
+  REGARDING: "Regarding",
+  DURATION: "Duration",
+};
+
 export const access_token_api_url =
   "https://api.easy-pluginz.com.au/admin/v2/data/zoho/crm/downloadattachment";
 
