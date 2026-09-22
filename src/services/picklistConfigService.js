@@ -171,7 +171,7 @@ const _paginateSdk = async (entity) => {
         `Widget_Picklist_Config SDK fetch failed for ${entity} page ${page}:`,
         error
       );
-      return all;
+      return [];
     }
 
     if (_isInvalidModule(response)) {
