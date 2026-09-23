@@ -284,10 +284,10 @@ export function Dialog({
       selectedParticipants = selectedContacts;
     }
 
-    if (selectedParticipants.length === 0) {
+    if (selectedParticipants.length === 0 && currentModuleData?.Contact_Name?.id) {
       selectedParticipants = [{
-        id: currentModuleData?.Contact_Name?.id,
-        Full_Name: currentModuleData?.Contact_Name?.name
+        id: currentModuleData.Contact_Name.id,
+        Full_Name: currentModuleData.Contact_Name.name
       }];
     }
 
@@ -343,78 +343,94 @@ export function Dialog({
         APIData: { ...finalData },
         Trigger: ["workflow"],
       };
-  
+
       const createResponse = await ZOHO.CRM.API.insertRecord(createConfig);
-  
-      if (createResponse?.data[0]?.code === "SUCCESS") {
-        const historyId = createResponse.data[0].details.id;
-        let createdRecords = [];
-  
-        // Step 2: Upload attachment if it exists and is a File object (new file selected)
-        if (formData?.attachment && formData.attachment instanceof File) {
-          try {
-            const fileResp = await zohoApi.file.uploadAttachment({
-              module: "Applications_History",
-              recordId: historyId,
-              data: formData.attachment,
-            });
-            console.log({ fileResp });
-            if (fileResp.error) {
-              console.error("Error uploading attachment:", fileResp.error);
-            }
-          } catch (error) {
-            console.error("Error uploading attachment:", error);
-          }
-        }
-  
-        // Step 3: Prepare contact history insert requests
-        const contactRequests = selectedParticipants.map((contact) => ({
-          Entity: "Application_Hstory", // Correct entity name
-          APIData: {
-            Application_Hstory: { id: historyId }, // Corrected entity reference
-            Contact: { id: contact.id },
-          },
-          Trigger: ["workflow"],
-        }));
-  
-        // Step 4: Execute all contact history insertions in parallel
-        const contactHistoryResponses = await Promise.all(
-          contactRequests.map((config) => ZOHO.CRM.API.insertRecord(config))
+
+      if (createResponse?.data?.[0]?.code !== "SUCCESS") {
+        throw new Error(
+          createResponse?.data?.[0]?.message ||
+            "Failed to create Applications_History record."
         );
-  
-        contactHistoryResponses.forEach((response, index) => {
-          if (response?.data[0]?.code === "SUCCESS") {
-            createdRecords.push(selectedParticipants[index].id);
-          } else {
-            console.warn(
-              `Failed to insert Applications_History record for contact ID ${selectedParticipants[index].id}`
-            );
-          }
-        });
-  
-        // Step 5: Set success message & notify parent
-        setSnackbar({
-          open: true,
-          message: "Record created successfully!",
-          severity: "success",
-        });
-  
-        const updatedRecord = {
-          ...finalData,
-          id: historyId || null, // Set the first inserted History_X_Contacts ID (or null if none succeeded)
-          Participants: selectedParticipants,
-          stakeHolder: finalData?.Stakeholder,
-        };
-  
-        if (onRecordAdded) onRecordAdded(updatedRecord);
-      } else {
-        throw new Error("Failed to create Applications_History record.");
       }
+
+      const historyId = createResponse.data[0].details.id;
+
+      // Step 2: Notify parent right away so the new record shows immediately.
+      // The history record already exists in CRM — anything below (attachment
+      // upload, participant links) must not turn this create into an error.
+      const updatedRecord = {
+        ...finalData,
+        id: historyId,
+        Participants: selectedParticipants,
+        stakeHolder: finalData?.Stakeholder,
+      };
+
+      if (onRecordAdded) onRecordAdded(updatedRecord);
+
+      // Step 3: Upload attachment if it exists and is a File object (new file selected)
+      if (formData?.attachment && formData.attachment instanceof File) {
+        try {
+          const fileResp = await zohoApi.file.uploadAttachment({
+            module: "Applications_History",
+            recordId: historyId,
+            data: formData.attachment,
+          });
+          console.log({ fileResp });
+          if (fileResp.error) {
+            console.error("Error uploading attachment:", fileResp.error);
+          }
+        } catch (error) {
+          console.error("Error uploading attachment:", error);
+        }
+      }
+
+      // Step 4: Link participants via junction records (skip contacts without an id).
+      // A failed link must not fail the whole create — the record already exists.
+      const participantsWithId = (selectedParticipants || []).filter(
+        (contact) => contact?.id
+      );
+
+      const contactResults = await Promise.allSettled(
+        participantsWithId.map((contact) =>
+          ZOHO.CRM.API.insertRecord({
+            Entity: "Application_Hstory",
+            APIData: {
+              Application_Hstory: { id: historyId },
+              Contact: { id: contact.id },
+            },
+            Trigger: ["workflow"],
+          })
+        )
+      );
+
+      let failedLinks = 0;
+      contactResults.forEach((result, index) => {
+        const failed =
+          result.status === "rejected" ||
+          result.value?.data?.[0]?.code !== "SUCCESS";
+        if (failed) {
+          failedLinks += 1;
+          console.warn(
+            `Failed to link contact ID ${participantsWithId[index].id} to history ${historyId}:`,
+            result.status === "rejected" ? result.reason : result.value?.data?.[0]
+          );
+        }
+      });
+
+      // Step 5: Final feedback — warning (not error) if some contacts could not be linked
+      setSnackbar({
+        open: true,
+        message:
+          failedLinks > 0
+            ? `Record created, but ${failedLinks} contact(s) could not be linked.`
+            : "Record created successfully!",
+        severity: failedLinks > 0 ? "warning" : "success",
+      });
     } catch (error) {
       console.error("Error creating history:", error);
       setSnackbar({
         open: true,
-        message: `Error: ${error.message}`,
+        message: `Error: ${error?.message || "An error occurred."}`,
         severity: "error",
       });
       throw error;
