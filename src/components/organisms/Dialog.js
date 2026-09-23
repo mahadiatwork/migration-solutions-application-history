@@ -107,6 +107,12 @@ export function Dialog({
     ? getTypeOptionsFromConfig(picklistConfig)
     : fallbackTypeOptions;
 
+  // Current module record's stakeholder (Matters/Applications may use different API names)
+  const getModuleStakeholder = React.useCallback(() => {
+    const sh = currentModuleData?.Stake_Holder ?? currentModuleData?.Stakeholder;
+    return sh?.id ? { id: sh.id, name: sh.name } : null;
+  }, [currentModuleData]);
+
   const [, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);
   const [selectedOwner, setSelectedOwner] = React.useState(
@@ -191,7 +197,7 @@ export function Dialog({
           details: selectedRowData?.details || "",
           stakeHolder: (selectedRowData?.stakeHolder && typeof selectedRowData.stakeHolder === "object" && selectedRowData.stakeHolder?.id !== null && selectedRowData.stakeHolder?.id !== undefined)
             ? selectedRowData.stakeHolder
-            : null,
+            : getModuleStakeholder(),
           date_time: selectedRowData?.date_time
             ? dayjs(selectedRowData.date_time)
             : dayjs(),
@@ -222,7 +228,7 @@ export function Dialog({
       setFormData({});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- form init; ownerList/setSelectedContacts stable
-  }, [openDialog, selectedRowData, loggedInUser, currentContact]);
+  }, [openDialog, selectedRowData, loggedInUser, currentContact, currentModuleData]);
 
   React.useEffect(() => {
     const fetchHistoryData = async () => {
@@ -307,7 +313,7 @@ export function Dialog({
         : formData.result,
       Stakeholder: formData.stakeHolder
         ? { id: formData.stakeHolder?.id, name: formData.stakeHolder?.name }
-        : { id: currentModuleData?.Stake_Holder?.id, name: currentModuleData?.Stake_Holder?.name },
+        : getModuleStakeholder(),
       History_Type: formData.type || "",
       Duration_Min: formData.duration ? String(formData.duration) : null,
       Date: formData.date_time
