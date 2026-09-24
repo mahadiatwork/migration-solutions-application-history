@@ -25,7 +25,11 @@ import { DemoContainer } from "@mui/x-date-pickers/internals/demo";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker";
-import { getRegardingOptions, getResultOptions } from "./helperFunc";
+import {
+  getRegardingOptions,
+  getResultOptions,
+  resolveModuleStakeholder,
+} from "./helperFunc";
 import {
   durationOptions as fallbackDurationOptions,
   typeOptions as fallbackTypeOptions,
@@ -108,10 +112,10 @@ export function Dialog({
     : fallbackTypeOptions;
 
   // Current module record's stakeholder (Matters/Applications may use different API names)
-  const getModuleStakeholder = React.useCallback(() => {
-    const sh = currentModuleData?.Stake_Holder ?? currentModuleData?.Stakeholder;
-    return sh?.id ? { id: sh.id, name: sh.name } : null;
-  }, [currentModuleData]);
+  const getModuleStakeholder = React.useCallback(
+    () => resolveModuleStakeholder(currentModuleData),
+    [currentModuleData]
+  );
 
   const [, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);

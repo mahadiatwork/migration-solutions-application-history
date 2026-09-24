@@ -65,6 +65,25 @@ export const getResultOptions = (type, config) => {
   }
 };
 
+/**
+ * Resolve the Stakeholder lookup from the current Matter record.
+ * Zoho can expose the same labelled field under different API names.
+ */
+export const resolveModuleStakeholder = (moduleData) => {
+  const stakeholder = [
+    moduleData?.Stakeholder_1,
+    moduleData?.Stake_Holder,
+    moduleData?.Stakeholder,
+  ].find((candidate) => candidate?.id);
+
+  if (!stakeholder) return null;
+
+  return {
+    id: stakeholder.id,
+    name: stakeholder.name || stakeholder.Account_Name || "",
+  };
+};
+
 export const getRegardingOptions = (type, existingValue, config) => {
   if (config?.regarding) {
     const typeRegarding = config.regarding[type];
