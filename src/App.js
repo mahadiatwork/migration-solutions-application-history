@@ -18,6 +18,7 @@ import {
   fetchPicklistConfig,
   getTypeOptionsFromConfig,
 } from "./services/picklistConfigService";
+import { mergeApplicationHistoryRows } from "./services/applicationHistorySnapshot";
 import { Table } from "./components/organisms/Table";
 import { Dialog } from "./components/organisms/Dialog";
 import {
@@ -70,6 +71,8 @@ const dateOptions = [
 
 const App = () => {
   const { module, recordId, initZoho } = useZohoInit();
+  const isMatterContext =
+    module === "Applications" || module === "Application" || module === "Deals";
   const { enqueueSnackbar } = useSnackbar();
   const [initPageContent, setInitPageContent] = React.useState(
     <CircularProgress />
@@ -258,7 +261,9 @@ const App = () => {
         return item;
       });
 
-      setRelatedListData(tempData || []);
+      setRelatedListData((previous) =>
+        mergeApplicationHistoryRows(previous, tempData || [])
+      );
       
       const types = data
         ?.map((el) => el.History_Type)
@@ -348,11 +353,15 @@ const App = () => {
       date_time: newRecord.Date || dayjs().format(), // Ensure date is consistent
       type: newRecord.History_Type || "Unknown Type",
       result: newRecord.History_Result || "No Result",
-      duration: newRecord.Duration_Min || "N/A",
+      duration: newRecord.Duration_Min ?? "N/A",
       regarding: newRecord.Regarding || "No Regarding",
       details: newRecord.History_Details || "No Details",
       ownerName: newRecord.Owner?.full_name || "Unknown Owner",
       stakeHolder: newRecord.Stakeholder || null,
+      matterNo: newRecord.Matter_No ?? "",
+      currentStage: newRecord.Current_Stage ?? "",
+      matterProgress: newRecord.Matter_Progress ?? "",
+      billingType: newRecord.Billing_Type ?? "Billable",
       Participants: participantsArray,
     };
 
@@ -396,6 +405,10 @@ const App = () => {
       ownerName: updatedRecord?.Owner?.full_name,
       date_time: updatedRecord?.Date, // Ensure date is consistent
       stakeHolder: updatedRecord?.Stakeholder,
+      matterNo: updatedRecord?.Matter_No ?? "",
+      currentStage: updatedRecord?.Current_Stage ?? "",
+      matterProgress: updatedRecord?.Matter_Progress ?? "",
+      billingType: updatedRecord?.Billing_Type ?? "Billable",
       name: currentModuleData?.Name + " - " + updatedHistoryName,
     };
 
@@ -468,7 +481,7 @@ const App = () => {
   const getActiveFilterNames = () => {
     const active = [];
     if (dateRange?.preDay || dateRange?.startDate || dateRange?.custom) active.push("Date");
-    if (selectedType) active.push("Type");
+    if (selectedType) active.push("Category");
     if (selectedOwner) active.push("User");
     if (keyword?.trim()) active.push("Keyword");
     return active;
@@ -713,7 +726,7 @@ const App = () => {
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Types"
+                    label="Categories"
                     size="small"
                     InputLabelProps={{ style: { fontSize: "9pt" } }}
                   />
@@ -805,7 +818,7 @@ const App = () => {
             </Grid>
             <Grid item xs={9}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, fontSize: "9pt" }}>
-                <span>Total Records {filteredData?.length ?? 0}</span>
+                <span>Total Records {filteredData?.length ?? 0} [application-matter-v1]</span>
                 {getActiveFilterNames().length > 0 && (
                   <>
                     <span>•</span>
@@ -933,7 +946,7 @@ const App = () => {
                   },
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Types" size="small" />
+                  <TextField {...params} label="Categories" size="small" />
                 )}
                 onChange={(e, value) => setSelectedType(value)}
               />
@@ -1005,8 +1018,8 @@ const App = () => {
                   <TableHead>
                     <TableRow>
                       <TableCell>Name</TableCell>
-                      <TableCell>Type</TableCell>
-                      <TableCell>Result</TableCell>
+                      <TableCell>Category</TableCell>
+                      <TableCell>Activity Type</TableCell>
                       <TableCell>Date & Time</TableCell>
                       <TableCell>Owner</TableCell>
                     </TableRow>
@@ -1076,6 +1089,7 @@ const App = () => {
         selectedParticipants={selectedParticipants}
         setSelectedParticipants={setSelectedParticipants}
         picklistConfig={picklistConfig}
+        isMatterContext={isMatterContext}
       />
       <Dialog
         openDialog={openCreateDialog}
@@ -1093,6 +1107,7 @@ const App = () => {
         selectedParticipants={selectedParticipants}
         setSelectedParticipants={setSelectedParticipants}
         picklistConfig={picklistConfig}
+        isMatterContext={isMatterContext}
       />
       {isCustomRangeDialogOpen && (
         <MUIDialog

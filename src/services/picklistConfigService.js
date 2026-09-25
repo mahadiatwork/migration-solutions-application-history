@@ -17,6 +17,8 @@ import {
   typeOptions as defaultTypeOptions,
   resultMapping as defaultResultMapping,
   durationOptions as defaultDurationOptions,
+  mergeCategoryOptions,
+  mergeDurationOptions,
 } from "../components/organisms/dialogConstants";
 
 const ZOHO = window.ZOHO;
@@ -317,15 +319,15 @@ const _groupRecords = (records) => {
 };
 
 export const getTypeOptionsFromConfig = (config) => {
-  if (config?.types && config.types.length > 0) {
-    return config.types;
+  if (Array.isArray(config?.types)) {
+    return mergeCategoryOptions(config.types);
   }
   return defaultTypeOptions;
 };
 
 export const getDurationOptionsFromConfig = (config) => {
-  if (config?.durations && config.durations.length > 0) {
-    return config.durations;
+  if (Array.isArray(config?.durations)) {
+    return mergeDurationOptions(config.durations);
   }
   return defaultDurationOptions;
 };

@@ -31,10 +31,15 @@ import {
   resolveModuleStakeholder,
 } from "./helperFunc";
 import {
+  DEFAULT_CATEGORY,
+  DEFAULT_ACTIVITY_TYPE,
+  DEFAULT_BILLING_TYPE,
+  billingTypeOptions,
   durationOptions as fallbackDurationOptions,
   typeOptions as fallbackTypeOptions,
   resultMapping as fallbackResultMapping,
-  typeMapping as fallbackTypeMapping,
+  mergeOrderedUnique,
+  serializeDuration,
 } from "./dialogConstants";
 import {
   getTypeOptionsFromConfig,
@@ -50,6 +55,27 @@ import ApplicationDialog from "./ApplicationTable";
 import ContactDialog from "./ContactTable";
 import Stakeholder from "../atoms/Stakeholder";
 import { Close } from "@mui/icons-material";
+import { MATTERS_MODULE } from "../../config/config";
+import {
+  buildApplicationHistorySummary,
+  inferMatterProgressFieldType,
+  matterSummaryForEdit,
+  matterSummaryFromSource,
+} from "../../services/applicationHistorySnapshot";
+import {
+  fetchMatterPicklistMetadata,
+  fetchApplicationHistoryProgressFieldType,
+  getProgressOptions,
+  getStageOptions,
+  normalizePicklistValue,
+} from "../../services/matterMetadata";
+
+const EMPTY_MATTER_METADATA = {
+  stages: [],
+  progress: [],
+  progressByStage: {},
+  dependencyError: null,
+};
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -87,6 +113,7 @@ export function Dialog({
   selectedParticipants,
   setSelectedParticipants,
   picklistConfig = null,
+  isMatterContext = true,
 }) {
   const durationOptions = picklistConfig
     ? getDurationOptionsFromConfig(picklistConfig)
@@ -94,22 +121,12 @@ export function Dialog({
   const resultMapping = picklistConfig
     ? getResultMappingFromConfig(picklistConfig)
     : fallbackResultMapping;
-  const typeMapping = React.useMemo(() => {
-    if (picklistConfig?.results) {
-      const mapping = {};
-      for (const [type, list] of Object.entries(picklistConfig.results)) {
-        if (type === "_default") continue;
-        for (const result of list) {
-          mapping[result] = type;
-        }
-      }
-      if (Object.keys(mapping).length > 0) return mapping;
-    }
-    return fallbackTypeMapping;
-  }, [picklistConfig]);
-  const typeOptions = picklistConfig
-    ? getTypeOptionsFromConfig(picklistConfig)
-    : fallbackTypeOptions;
+  const typeOptions = mergeOrderedUnique(
+    picklistConfig
+      ? getTypeOptionsFromConfig(picklistConfig)
+      : fallbackTypeOptions,
+    [selectedRowData?.type]
+  );
 
   // Current module record's stakeholder (Matters/Applications may use different API names)
   const getModuleStakeholder = React.useCallback(
@@ -131,12 +148,23 @@ export function Dialog({
     React.useState();
   const [formData, setFormData] = React.useState(selectedRowData || {}); // Form data state
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isMatterLoading, setIsMatterLoading] = React.useState(false);
+  const [matterLoadError, setMatterLoadError] = React.useState("");
+  const [progressFieldType, setProgressFieldType] = React.useState("picklist");
+  const [sourceMatterId, setSourceMatterId] = React.useState(null);
+  const [matterMetadata, setMatterMetadata] = React.useState(
+    EMPTY_MATTER_METADATA
+  );
   // console.log({ formData });
   const [snackbar, setSnackbar] = React.useState({
     open: false,
     message: "",
     severity: "success",
   });
+
+  React.useLayoutEffect(() => {
+    setIsMatterLoading(Boolean(openDialog));
+  }, [openDialog, selectedRowData?.id, currentModuleData?.id]);
 
   const handleSelectFile = async (e) => {
     e.preventDefault();
@@ -181,24 +209,36 @@ export function Dialog({
     if (openDialog) {
       setIsSubmitting(false);
       setFormData((prev) => {
-        const defaultType = selectedRowData?.type || typeOptions[0] || "Meeting";
+        const defaultType = selectedRowData?.type || DEFAULT_CATEGORY;
         const defaultResult =
           selectedRowData?.result ||
-          resultMapping[defaultType] ||
           getResultOptions(defaultType, picklistConfig)[0] ||
-          "Meeting Held";
+          resultMapping[defaultType] ||
+          DEFAULT_ACTIVITY_TYPE;
+        const sourceSummary = matterSummaryFromSource(
+          isMatterContext ? currentModuleData : null
+        );
         const base = {
           Participants: selectedRowData?.Participants || [],
           result: defaultResult,
           type: defaultType,
           duration: (() => {
             const d = selectedRowData?.duration;
-            if (d == null || d === "N/A" || d === "") return 60;
+            if (d == null || d === "N/A" || d === "") return 0;
             const n = Number(d);
-            return Number.isFinite(n) ? n : 60;
+            return Number.isFinite(n) ? n : 0;
           })(),
           regarding: selectedRowData?.regarding || "",
           details: selectedRowData?.details || "",
+          ...sourceSummary,
+          currentStage:
+            normalizePicklistValue(selectedRowData?.currentStage) ||
+            sourceSummary.currentStage,
+          matterProgress:
+            normalizePicklistValue(selectedRowData?.matterProgress) ||
+            sourceSummary.matterProgress,
+          billingType:
+            selectedRowData?.billingType || DEFAULT_BILLING_TYPE,
           stakeHolder: (selectedRowData?.stakeHolder && typeof selectedRowData.stakeHolder === "object" && selectedRowData.stakeHolder?.id !== null && selectedRowData.stakeHolder?.id !== undefined)
             ? selectedRowData.stakeHolder
             : getModuleStakeholder(),
@@ -230,9 +270,84 @@ export function Dialog({
     } else {
       // Reset formData to avoid stale data
       setFormData({});
+      setMatterMetadata(EMPTY_MATTER_METADATA);
+      setMatterLoadError("");
+      setProgressFieldType("picklist");
+      setSourceMatterId(null);
+      setIsMatterLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- form init; ownerList/setSelectedContacts stable
-  }, [openDialog, selectedRowData, loggedInUser, currentContact, currentModuleData]);
+  }, [openDialog, selectedRowData?.id, loggedInUser?.id, currentContact?.id, currentModuleData?.id, isMatterContext]);
+
+  React.useEffect(() => {
+    if (!openDialog) return undefined;
+    let cancelled = false;
+
+    const loadMatterSummary = async () => {
+      setIsMatterLoading(true);
+      setMatterLoadError("");
+      try {
+        let sourceMatter = isMatterContext ? currentModuleData : null;
+        let summary = matterSummaryFromSource(sourceMatter);
+        let savedHistory = null;
+        if (selectedRowData?.id) {
+          const response = await ZOHO.CRM.API.getRecord({
+            Entity: "Applications_History",
+            approved: "both",
+            RecordID: selectedRowData.id,
+          });
+          savedHistory = response?.data?.[0];
+          if (!savedHistory) {
+            throw new Error("Could not load this history record. Close and reopen it to retry.");
+          }
+          if (!sourceMatter && savedHistory?.Application?.id) {
+            const matterResponse = await ZOHO.CRM.API.getRecord({
+              Entity: MATTERS_MODULE,
+              approved: "both",
+              RecordID: savedHistory.Application.id,
+            });
+            sourceMatter = matterResponse?.data?.[0] || null;
+          }
+          summary = matterSummaryForEdit(sourceMatter, savedHistory);
+        }
+
+        if (!cancelled) {
+          setFormData((previous) => ({ ...previous, ...summary }));
+          setSourceMatterId(sourceMatter?.id || savedHistory?.Application?.id || null);
+        }
+
+        let dataType = inferMatterProgressFieldType(
+          savedHistory,
+          sourceMatter
+        );
+        try {
+          dataType =
+            (await fetchApplicationHistoryProgressFieldType()) || dataType;
+        } catch (error) {
+          console.warn("Could not read Application History field type:", error);
+        }
+        if (!cancelled) setProgressFieldType(dataType);
+
+        const metadata = await fetchMatterPicklistMetadata(sourceMatter);
+        if (!cancelled) setMatterMetadata(metadata);
+      } catch (error) {
+        console.error("Could not load Application History Matter summary:", error);
+        if (!cancelled) {
+          setMatterLoadError(error?.message || "Could not load the Matter summary.");
+        }
+      } finally {
+        if (!cancelled) setIsMatterLoading(false);
+      }
+    };
+
+    loadMatterSummary();
+    return () => {
+      cancelled = true;
+    };
+  // The Matter is keyed by record ID; a background refresh must not replace
+  // values the user is editing in this open dialog.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDialog, selectedRowData?.id, currentModuleData?.id, isMatterContext, ZOHO]);
 
   React.useEffect(() => {
     const fetchHistoryData = async () => {
@@ -280,8 +395,48 @@ export function Dialog({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
+  const currentStageOptions = getStageOptions(
+    matterMetadata,
+    formData.currentStage
+  );
+  const currentProgressOptions = getProgressOptions(
+    matterMetadata,
+    formData.currentStage,
+    formData.matterProgress
+  );
+
+  const handleCurrentStageChange = (nextStage) => {
+    const currentStage = normalizePicklistValue(nextStage);
+    const allowedProgress = getProgressOptions(matterMetadata, currentStage);
+    setFormData((previous) => ({
+      ...previous,
+      currentStage,
+      matterProgress: allowedProgress.includes(previous.matterProgress)
+        ? previous.matterProgress
+        : "",
+    }));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isMatterLoading || matterLoadError) {
+      setSnackbar({
+        open: true,
+        message: matterLoadError || "Please wait for the Matter summary to load.",
+        severity: "error",
+      });
+      return;
+    }
+    if (!sourceMatterId) {
+      setSnackbar({
+        open: true,
+        message: selectedRowData
+          ? "Could not resolve the Matter for this history entry. Close and reopen it to retry."
+          : "Open a Matter record to create Application History.",
+        severity: "error",
+      });
+      return;
+    }
     setIsSubmitting(true);
 
     let selectedParticipants = [];
@@ -308,7 +463,7 @@ export function Dialog({
 
 
     const finalData = {
-      Name: currentModuleData?.Name + " - " + updatedHistoryName,
+      Name: (formData.matterNo || (isMatterContext ? currentModuleData?.Name : "") || "") + " - " + updatedHistoryName,
       History_Details: formData.details,
       Regarding: formData.regarding,
       Owner: selectedOwner,
@@ -319,19 +474,27 @@ export function Dialog({
         ? { id: formData.stakeHolder?.id, name: formData.stakeHolder?.name }
         : getModuleStakeholder(),
       History_Type: formData.type || "",
-      Duration_Min: formData.duration ? String(formData.duration) : null,
+      Duration_Min: serializeDuration(formData.duration),
       Date: formData.date_time
         ? dayjs(formData.date_time).format("YYYY-MM-DDTHH:mm:ssZ")
         : null,
-      Application: { id: currentModuleData?.id }
+      Application: { id: sourceMatterId },
+      ...buildApplicationHistorySummary(
+        {
+          ...formData,
+          matterNo: formData.matterNo,
+        },
+        progressFieldType
+      ),
     };
 
     try {
       if (selectedRowData) {
-        await updateHistory(selectedRowData, finalData, selectedParticipants, currentModuleData);
+        await updateHistory(selectedRowData, finalData, selectedParticipants);
       } else {
         await createHistory(finalData, selectedParticipants);
       }
+      handleCloseDialog();
     } catch (error) {
       console.error("Error saving records:", error);
       setSnackbar({
@@ -341,7 +504,6 @@ export function Dialog({
       });
     } finally {
       setIsSubmitting(false);
-      handleCloseDialog();
     }
   };
 
@@ -452,20 +614,14 @@ export function Dialog({
   const updateHistory = async (
     selectedRowData,
     finalData,
-    selectedParticipants,
-    currentModuleData
+    selectedParticipants
   ) => {
     try {
-      const updatedHistoryName = selectedParticipants
-        .map((c) => c.Full_Name)
-        .join(", ");
-
       const updateConfig = {
         Entity: "Applications_History",
         RecordID: selectedRowData?.id,
         APIData: {
           id: selectedRowData?.id,
-          Name: currentModuleData?.Name + " - " + updatedHistoryName,
           ...finalData
         },
         Trigger: ["workflow"],
@@ -697,6 +853,77 @@ export function Dialog({
             gap: "8px", // Reduce spacing between fields
           }}
         >
+          {matterLoadError && (
+            <Alert severity="error">{matterLoadError}</Alert>
+          )}
+          <Grid container spacing={1}>
+            <Grid item xs={12} sm={3}>
+              <TextField
+                fullWidth
+                variant="standard"
+                label="Matter No"
+                value={formData.matterNo || ""}
+                InputProps={{ readOnly: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={3}>
+              <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
+                <InputLabel>Current Stage</InputLabel>
+                <Select
+                  value={formData.currentStage || ""}
+                  onChange={(event) => handleCurrentStageChange(event.target.value)}
+                  label="Current Stage"
+                >
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {currentStageOptions.map((stage) => (
+                    <MenuItem key={stage} value={stage}>{stage}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={3}>
+              <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
+                <InputLabel>Matter Progress</InputLabel>
+                <Select
+                  value={formData.matterProgress || ""}
+                  onChange={(event) =>
+                    handleInputChange("matterProgress", event.target.value)
+                  }
+                  label="Matter Progress"
+                >
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {currentProgressOptions.map((progress) => (
+                    <MenuItem key={progress} value={progress}>{progress}</MenuItem>
+                  ))}
+                </Select>
+                {!isMatterLoading && formData.currentStage && currentProgressOptions.length === 0 && (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+                    {matterMetadata.dependencyError
+                      ? "Matter Progress rules could not be loaded. The CRM connection may need map_dependency.READ access."
+                      : "No Matter Progress values are mapped to this Current Stage in Zoho."}
+                  </Typography>
+                )}
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={3}>
+              <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
+                <InputLabel>Billing Type</InputLabel>
+                <Select
+                  value={formData.billingType || DEFAULT_BILLING_TYPE}
+                  onChange={(event) =>
+                    handleInputChange("billingType", event.target.value)
+                  }
+                  label="Billing Type"
+                >
+                  {billingTypeOptions.map((billingType) => (
+                    <MenuItem key={billingType} value={billingType}>
+                      {billingType}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
           <Grid container spacing={1}>
             <Grid item xs={12} sm={6}>
               <FormControl
@@ -704,7 +931,7 @@ export function Dialog({
                 variant="standard"
                 sx={{ fontSize: "9pt" }}
               >
-                <InputLabel sx={{ fontSize: "9pt" }}>Type</InputLabel>
+                <InputLabel sx={{ fontSize: "9pt" }}>Category</InputLabel>
                 <Select
                   value={formData.type || ""} // Ensure a fallback value
                   onChange={(e) => {
@@ -713,14 +940,14 @@ export function Dialog({
                     const results = getResultOptions(type, picklistConfig);
                     handleInputChange(
                       "result",
-                      resultMapping[type] || results[0] || ""
+                      results[0] || resultMapping[type] || ""
                     );
                     handleInputChange(
                       "regarding",
                       getRegardingOptions(type, undefined, picklistConfig)[0] || ""
                     );
                   }}
-                  label="Type"
+                  label="Category"
                   sx={{
                     "& .MuiSelect-select": {
                       fontSize: "9pt",
@@ -742,27 +969,21 @@ export function Dialog({
                 variant="standard"
                 sx={{ fontSize: "9pt" }}
               >
-                <InputLabel sx={{ fontSize: "9pt" }}>Result</InputLabel>
+                <InputLabel sx={{ fontSize: "9pt" }}>Activity Type</InputLabel>
                 <Select
                   value={formData.result || ""} // Ensure a fallback value
                   onChange={(e) => {
                     const selectedResult = e.target.value;
                     handleInputChange("result", selectedResult);
-
-                    // Autopopulate the type if a mapping exists
-                    const correspondingType = typeMapping[selectedResult];
-                    if (correspondingType) {
-                      handleInputChange("type", correspondingType);
-                    }
                   }}
-                  label="Result"
+                  label="Activity Type"
                   sx={{
                     "& .MuiSelect-select": {
                       fontSize: "9pt",
                     },
                   }}
                 >
-                  {getResultOptions(formData.type, picklistConfig).map((result) => (
+                  {getResultOptions(formData.type, picklistConfig, formData.result).map((result) => (
                     <MenuItem
                       key={result}
                       value={result}
@@ -868,7 +1089,11 @@ export function Dialog({
                 value={formData?.duration != null ? Number(formData.duration) : null}
                 isOptionEqualToValue={(option, value) => option === value || Number(option) === Number(value)}
                 onChange={(event, newValue) => {
-                  const val = typeof newValue === "string" ? Number(newValue) || null : newValue;
+                  const val = typeof newValue === "string"
+                    ? newValue.trim() !== "" && Number.isFinite(Number(newValue))
+                      ? Number(newValue)
+                      : null
+                    : newValue;
                   handleInputChange("duration", val);
                 }}
                 renderInput={(params) => (
@@ -1152,11 +1377,11 @@ export function Dialog({
             <Button 
               type="submit" 
               variant="contained" 
-              disabled={isSubmitting}
+              disabled={isSubmitting || isMatterLoading || Boolean(matterLoadError)}
               sx={{ fontSize: "9pt", display: "flex", alignItems: "center", gap: 1 }}
             >
-              {isSubmitting && <CircularProgress size={16} />}
-              {isSubmitting ? "Saving..." : buttonText}
+              {(isSubmitting || isMatterLoading) && <CircularProgress size={16} />}
+              {isSubmitting ? "Saving..." : isMatterLoading ? "Loading matter..." : buttonText}
             </Button>
           </Box>
         </DialogActions>
@@ -1186,6 +1411,7 @@ export function Dialog({
           ...(Array.isArray(selectedParticipants) ? selectedParticipants : []),
         ]}
         currentModuleData={currentModuleData}
+        sourceMatterId={sourceMatterId}
         onRecordMoved={(movedId) => {
           if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
         }}

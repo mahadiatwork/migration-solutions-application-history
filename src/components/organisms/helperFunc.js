@@ -1,3 +1,5 @@
+import { mandatoryActivityTypes, mergeOrderedUnique } from "./dialogConstants";
+
 /**
  * Result and Regarding options.
  *
@@ -5,21 +7,41 @@
  * Hard-coded lists are the fallback if CRM cannot be read.
  */
 
-export const getResultOptions = (type, config) => {
-  if (config?.results) {
-    const typeResults = config.results[type];
+export const getResultOptions = (type, config, existingValue) => {
+  const hasConfiguredResults =
+    config?._source === "custom_module" ||
+    (config?.results && typeof config.results === "object");
+
+  if (hasConfiguredResults) {
+    const configuredResults = config?.results || {};
+    const typeResults = configuredResults[type];
     if (typeResults && typeResults.length > 0) {
-      return typeResults;
+      return mandatoryActivityTypes[type]
+        ? mergeOrderedUnique(mandatoryActivityTypes[type], typeResults, [existingValue])
+        : mergeOrderedUnique(typeResults, [existingValue]);
     }
-    const defaultResults = config.results["_default"];
+
+    // Keep the required dependencies usable when the CRM config still lists
+    // only legacy categories. An explicit CRM dependency remains authoritative.
+    if (mandatoryActivityTypes[type]) {
+      return mergeOrderedUnique(mandatoryActivityTypes[type], [existingValue]);
+    }
+
+    const defaultResults = configuredResults["_default"];
     if (defaultResults && defaultResults.length > 0) {
-      return defaultResults;
+      return mergeOrderedUnique(defaultResults, [existingValue]);
     }
+    return mergeOrderedUnique([existingValue]);
   }
 
-  switch (type) {
+  if (mandatoryActivityTypes[type]) {
+    return mergeOrderedUnique(mandatoryActivityTypes[type], [existingValue]);
+  }
+
+  const fallbackResults = (() => {
+    switch (type) {
     case "Meeting":
-      return ["Meeting Held", "Meeting Not Held"]; // Wrap in an array
+      return ["Meeting Held", "Meeting Not Held"];
     case "To-Do":
       return ["To-do Done", "To-do Not Done"];
     case "Appointment":
@@ -57,12 +79,15 @@ export const getResultOptions = (type, config) => {
     case "Room 1":
     case "Room 2":
     case "Room 3":
-      return [`${type} - Completed`, `${type} - Not Completed`]; // Wrap in an array
+      return [`${type} - Completed`, `${type} - Not Completed`];
     case "Other":
       return ["Attachment", "E-mail Attachment", "E-mail Auto Attached", "E-mail Sent"];
     default:
-      return ["Note"]; // Wrap default return in an array
-  }
+      return ["Note"];
+    }
+  })();
+
+  return mergeOrderedUnique(fallbackResults, [existingValue]);
 };
 
 /**

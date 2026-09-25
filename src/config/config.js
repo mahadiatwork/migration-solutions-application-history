@@ -9,6 +9,23 @@ export const dataCenterMap = {
 
 export const conn_name = "zoho_crm_conn";
 
+// Applications is the source Matter. The history fields below are snapshots
+// stored on Applications_History; editing them must not update Applications.
+export const MATTERS_MODULE = "Applications";
+export const APPLICATION_HISTORY_MODULE = "Applications_History";
+export const MATTER_SOURCE_FIELDS = {
+  id: "id",
+  matterNo: "Name",
+  currentStage: "Current_Stage",
+  matterProgress: "Matter_Progress",
+};
+export const APPLICATION_HISTORY_MATTER_FIELDS = {
+  matterNo: "Matter_No",
+  currentStage: "Current_Stage",
+  matterProgress: "Matter_Progress",
+  billingType: "Billing_Type",
+};
+
 // Widget_Picklist_Config — one CRM record = one Type / Result / Regarding / Duration option.
 // If the API name is rejected as INVALID_MODULE, retry CustomModule15.
 export const PICKLIST_CONFIG_MODULE = "Widget_Picklist_Config";

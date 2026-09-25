@@ -144,6 +144,7 @@ export const ContactDialog = ({
   selectedOwner,
   historyContacts = [],
   currentModuleData,
+  sourceMatterId,
   onRecordMoved,
 }) => {
   const [selectedContactId, setSelectedContactId] = useState(null);
@@ -349,13 +350,16 @@ export const ContactDialog = ({
         ...(ownerForApi ? { Owner: ownerForApi } : {}),
       };
 
-      const currentApplicationId = currentModuleData?.id;
+      const currentApplicationId = sourceMatterId || currentModuleData?.id;
       const matterFields = currentApplicationId
         ? {
             Matter: { id: currentApplicationId },
-            Matter_No: currentModuleData?.Name || null,
-            Current_Stage: currentModuleData?.Current_Stage || null,
-            Matter_Progress: formatMultiSelect(currentModuleData?.Matter_Progress),
+            Matter_No: formData?.matterNo || currentModuleData?.Name || null,
+            Current_Stage: formData?.currentStage ?? currentModuleData?.Current_Stage ?? null,
+            Matter_Progress: formatMultiSelect(
+              formData?.matterProgress ?? currentModuleData?.Matter_Progress
+            ),
+            Billing_Type: formData?.billingType || "Billable",
           }
         : {};
 
