@@ -272,7 +272,11 @@ export function Table({
                     <TableCell size="small">
                       {row.result || "No Result"}
                     </TableCell>
-                    <TableCell size="small">{row.duration || "N/A"}</TableCell>
+                    <TableCell size="small">
+                      {row.duration !== "" && row.duration != null
+                        ? row.duration
+                        : "N/A"}
+                    </TableCell>
                     <TableCell
                       size="small"
                       sx={{

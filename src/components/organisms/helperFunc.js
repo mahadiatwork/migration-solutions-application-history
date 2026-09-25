@@ -8,30 +8,19 @@ import { mandatoryActivityTypes, mergeOrderedUnique } from "./dialogConstants";
  */
 
 export const getResultOptions = (type, config, existingValue) => {
-  const hasConfiguredResults =
-    config?._source === "custom_module" ||
-    (config?.results && typeof config.results === "object");
-
-  if (hasConfiguredResults) {
+  if (config?._source === "custom_module") {
     const configuredResults = config?.results || {};
-    const typeResults = configuredResults[type];
-    if (typeResults && typeResults.length > 0) {
-      return mandatoryActivityTypes[type]
-        ? mergeOrderedUnique(mandatoryActivityTypes[type], typeResults, [existingValue])
-        : mergeOrderedUnique(typeResults, [existingValue]);
-    }
-
-    // Keep the required dependencies usable when the CRM config still lists
-    // only legacy categories. An explicit CRM dependency remains authoritative.
-    if (mandatoryActivityTypes[type]) {
-      return mergeOrderedUnique(mandatoryActivityTypes[type], [existingValue]);
-    }
-
-    const defaultResults = configuredResults["_default"];
-    if (defaultResults && defaultResults.length > 0) {
-      return mergeOrderedUnique(defaultResults, [existingValue]);
-    }
-    return mergeOrderedUnique([existingValue]);
+    const configuredOptions = Object.prototype.hasOwnProperty.call(
+      configuredResults,
+      type
+    )
+      ? (Array.isArray(configuredResults[type]) ? configuredResults[type] : [])
+      : Object.prototype.hasOwnProperty.call(configuredResults, "_default")
+        ? (Array.isArray(configuredResults._default)
+          ? configuredResults._default
+          : [])
+        : [];
+    return mergeOrderedUnique(configuredOptions, [existingValue]);
   }
 
   if (mandatoryActivityTypes[type]) {
@@ -110,24 +99,21 @@ export const resolveModuleStakeholder = (moduleData) => {
 };
 
 export const getRegardingOptions = (type, existingValue, config) => {
-  if (config?.regarding) {
-    const typeRegarding = config.regarding[type];
-    const defaultRegarding = config.regarding["_default"];
-    const source =
-      typeRegarding && typeRegarding.length > 0
-        ? typeRegarding
-        : defaultRegarding && defaultRegarding.length > 0
-          ? defaultRegarding
-          : null;
-
-    if (source) {
-      let options = [...source];
-      const safeValue = typeof existingValue === "string" ? existingValue : "";
-      if (safeValue.trim() !== "" && !options.includes(safeValue)) {
-        options = [safeValue, ...options];
-      }
-      return options;
-    }
+  if (config?._source === "custom_module") {
+    const configuredRegarding = config.regarding || {};
+    const source = Object.prototype.hasOwnProperty.call(
+      configuredRegarding,
+      type
+    )
+      ? (Array.isArray(configuredRegarding[type])
+        ? configuredRegarding[type]
+        : [])
+      : Object.prototype.hasOwnProperty.call(configuredRegarding, "_default")
+        ? (Array.isArray(configuredRegarding._default)
+          ? configuredRegarding._default
+          : [])
+        : [];
+    return mergeOrderedUnique(source, [existingValue]);
   }
 
   const options = {
@@ -165,3 +151,6 @@ export const getRegardingOptions = (type, existingValue, config) => {
 
   return predefinedOptions;
 };
+
+export const shouldOfferManualOther = (config, configuredOptions = []) =>
+  config?._source !== "custom_module" || configuredOptions.includes("Other");

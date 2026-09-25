@@ -244,10 +244,12 @@ const App = () => {
           name: obj?.Name || "No Name",
           id: obj?.id,
           date_time: obj?.Date,
-          type: obj?.History_Type || "Unknown Type",
-          result: obj?.History_Result || "No Result",
-          duration: (obj?.Duration_Min != null && String(obj.Duration_Min).trim() !== "") ? obj.Duration_Min : "N/A",
-          regarding: obj?.Regarding || "No Regarding",
+          // Keep stored values raw. Display-only placeholders must never become
+          // editable picklist values on a later update.
+          type: obj?.History_Type || "",
+          result: obj?.History_Result || "",
+          duration: (obj?.Duration_Min != null && String(obj.Duration_Min).trim() !== "") ? obj.Duration_Min : null,
+          regarding: obj?.Regarding || "",
           details: obj?.History_Details || "No Details",
           icon: <DownloadIcon />,
           ownerName: getOwnerDisplayName(obj?.Owner, allUsersForFilter),
@@ -267,7 +269,7 @@ const App = () => {
       
       const types = data
         ?.map((el) => el.History_Type)
-        ?.filter((el) => el !== undefined && el !== null);
+        ?.filter((el) => typeof el === "string" && el.trim() !== "");
 
       const sortedTypes = [...new Set(types)].sort((a, b) =>
         a.localeCompare(b)
@@ -281,9 +283,13 @@ const App = () => {
         console.warn("Widget_Picklist_Config: failed during history load", configError);
       }
       const configTypes = getTypeOptionsFromConfig(config);
-      const extraTypes = sortedTypes.filter((t) => !configTypes.includes(t));
-      extraTypes.sort((a, b) => a.localeCompare(b));
-      setTypeList([...configTypes, ...extraTypes]);
+      if (config?._source === "custom_module") {
+        setTypeList(configTypes);
+      } else {
+        const extraTypes = sortedTypes.filter((t) => !configTypes.includes(t));
+        extraTypes.sort((a, b) => a.localeCompare(b));
+        setTypeList([...configTypes, ...extraTypes]);
+      }
 
       setInitPageContent(null);
     } catch (error) {
@@ -306,6 +312,7 @@ const App = () => {
         setPicklistConfig(config);
         const fromModule = getTypeOptionsFromConfig(config);
         setTypeList((prev) => {
+          if (config?._source === "custom_module") return fromModule;
           const extra = prev.filter((t) => !fromModule.includes(t));
           return [...fromModule, ...extra];
         });
@@ -351,10 +358,10 @@ const App = () => {
       id: newRecord.id,
       name: currentModuleData?.Name + " - " + updatedHistoryName,
       date_time: newRecord.Date || dayjs().format(), // Ensure date is consistent
-      type: newRecord.History_Type || "Unknown Type",
-      result: newRecord.History_Result || "No Result",
-      duration: newRecord.Duration_Min ?? "N/A",
-      regarding: newRecord.Regarding || "No Regarding",
+      type: newRecord.History_Type || "",
+      result: newRecord.History_Result || "",
+      duration: newRecord.Duration_Min ?? null,
+      regarding: newRecord.Regarding || "",
       details: newRecord.History_Details || "No Details",
       ownerName: newRecord.Owner?.full_name || "Unknown Owner",
       stakeHolder: newRecord.Stakeholder || null,

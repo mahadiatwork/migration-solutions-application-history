@@ -1,6 +1,6 @@
 /**
- * Matter history picklist defaults. CRM configuration can add or override
- * options while these required categories remain available at the top.
+ * Matter history picklist fallbacks used only when CRM configuration cannot
+ * be reached. A successfully loaded custom module is authoritative.
  */
 
 export const DEFAULT_CATEGORY = "Communication & Meetings";

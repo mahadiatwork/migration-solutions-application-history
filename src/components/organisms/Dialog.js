@@ -31,7 +31,6 @@ import {
   resolveModuleStakeholder,
 } from "./helperFunc";
 import {
-  DEFAULT_CATEGORY,
   DEFAULT_ACTIVITY_TYPE,
   DEFAULT_BILLING_TYPE,
   billingTypeOptions,
@@ -115,9 +114,24 @@ export function Dialog({
   picklistConfig = null,
   isMatterContext = true,
 }) {
-  const durationOptions = picklistConfig
+  const configuredDurationOptions = picklistConfig
     ? getDurationOptionsFromConfig(picklistConfig)
     : fallbackDurationOptions;
+  const rawSelectedDuration = selectedRowData?.duration;
+  const selectedDuration =
+    rawSelectedDuration === null ||
+    rawSelectedDuration === undefined ||
+    rawSelectedDuration === ""
+      ? Number.NaN
+      : Number(rawSelectedDuration);
+  const durationOptions =
+    selectedRowData &&
+    Number.isFinite(selectedDuration) &&
+    !configuredDurationOptions.some(
+      (option) => Number(option) === selectedDuration
+    )
+      ? [selectedDuration, ...configuredDurationOptions]
+      : configuredDurationOptions;
   const resultMapping = picklistConfig
     ? getResultMappingFromConfig(picklistConfig)
     : fallbackResultMapping;
@@ -209,12 +223,16 @@ export function Dialog({
     if (openDialog) {
       setIsSubmitting(false);
       setFormData((prev) => {
-        const defaultType = selectedRowData?.type || DEFAULT_CATEGORY;
-        const defaultResult =
-          selectedRowData?.result ||
-          getResultOptions(defaultType, picklistConfig)[0] ||
-          resultMapping[defaultType] ||
-          DEFAULT_ACTIVITY_TYPE;
+        const defaultType = selectedRowData
+          ? selectedRowData?.type ?? ""
+          : typeOptions[0] || "";
+        const defaultResult = selectedRowData
+          ? selectedRowData?.result ?? ""
+          : getResultOptions(defaultType, picklistConfig)[0] ||
+            resultMapping[defaultType] ||
+            (picklistConfig?._source === "custom_module"
+              ? ""
+              : DEFAULT_ACTIVITY_TYPE);
         const sourceSummary = matterSummaryFromSource(
           isMatterContext ? currentModuleData : null
         );
@@ -223,10 +241,11 @@ export function Dialog({
           result: defaultResult,
           type: defaultType,
           duration: (() => {
+            if (!selectedRowData) return durationOptions[0] ?? null;
             const d = selectedRowData?.duration;
-            if (d == null || d === "N/A" || d === "") return 0;
+            if (d == null || d === "N/A" || d === "") return null;
             const n = Number(d);
-            return Number.isFinite(n) ? n : 0;
+            return Number.isFinite(n) ? n : null;
           })(),
           regarding: selectedRowData?.regarding || "",
           details: selectedRowData?.details || "",
@@ -277,7 +296,7 @@ export function Dialog({
       setIsMatterLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- form init; ownerList/setSelectedContacts stable
-  }, [openDialog, selectedRowData?.id, loggedInUser?.id, currentContact?.id, currentModuleData?.id, isMatterContext]);
+  }, [openDialog, selectedRowData?.id, loggedInUser?.id, currentContact?.id, currentModuleData?.id, isMatterContext, picklistConfig]);
 
   React.useEffect(() => {
     if (!openDialog) return undefined;
@@ -983,7 +1002,11 @@ export function Dialog({
                     },
                   }}
                 >
-                  {getResultOptions(formData.type, picklistConfig, formData.result).map((result) => (
+                  {getResultOptions(
+                    formData.type,
+                    picklistConfig,
+                    selectedRowData ? formData.result : undefined
+                  ).map((result) => (
                     <MenuItem
                       key={result}
                       value={result}
@@ -1083,7 +1106,7 @@ export function Dialog({
 
             <Grid item xs={6}>
               <Autocomplete
-                freeSolo
+                freeSolo={picklistConfig?._source !== "custom_module"}
                 options={durationOptions}
                 getOptionLabel={(option) => (option != null ? option.toString() : "")}
                 value={formData?.duration != null ? Number(formData.duration) : null}
