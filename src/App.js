@@ -128,21 +128,21 @@ const App = () => {
   const handleCloseEditDialog = (updatedRowData) => {
     if (updatedRowData) {
       setRelatedListData((prevData) =>
-        prevData.map((item) =>
-          item.id === updatedRowData.id
-            ? {
-                ...item,
-                ...updatedRowData,
-                name: updatedRowData.Participants
-                  ? updatedRowData.Participants.map((c) => c.Full_Name).join(
-                      ", "
-                    )
-                  : item.name,
-              }
-            : item
-        )
+        updatedRowData.deleted
+          ? prevData.filter((item) => item.id !== updatedRowData.id)
+          : prevData.map((item) =>
+              item.id === updatedRowData.id
+                ? {
+                    ...item,
+                    ...updatedRowData,
+                    name: updatedRowData.Participants
+                      ? updatedRowData.Participants.map((c) => c.Full_Name).join(", ")
+                      : item.name,
+                  }
+                : item
+            )
       );
-      setHighlightedRecordId(updatedRowData.id); // Set the highlighted record ID
+      if (!updatedRowData.deleted) setHighlightedRecordId(updatedRowData.id);
     }
     setSelectedRowData(null); // Clear selectedRowData
     setOpenEditDialog(false); // Close the dialog
@@ -610,13 +610,6 @@ const App = () => {
       });
 
       const uniqueContacts = Array.from(uniqueContactsMap.values());
-      if (uniqueContacts.length === 0) {
-        enqueueSnackbar("No related contacts found for this application.", {
-          variant: "info",
-        });
-        return;
-      }
-
       setContacts(uniqueContacts);
       setOpenContactDialog(true);
     } catch (error) {

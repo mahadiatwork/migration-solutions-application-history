@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import dayjs from "dayjs";
+import { moveApplicationHistoryToMain } from "../../services/moveApplicationHistory";
 import {
   Table,
   TableBody,
@@ -19,6 +19,8 @@ import {
   MenuItem,
   Typography,
   CircularProgress,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 
 const commonStyles = {
@@ -108,9 +110,6 @@ const ContactTable = ({
   );
 };
 
-const getContactId = (contact) =>
-  contact?.id || contact?.Contact?.id || null;
-
 const getContactName = (contact) =>
   contact?.Full_Name ||
   contact?.full_name ||
@@ -119,32 +118,12 @@ const getContactName = (contact) =>
   `${contact?.First_Name || ""} ${contact?.Last_Name || ""}`.trim() ||
   "";
 
-const formatMultiSelect = (value) => {
-  if (value == null || value === "") return null;
-  if (Array.isArray(value)) {
-    const joined = value.filter(Boolean).join(", ");
-    return joined || null;
-  }
-  return String(value);
-};
-
-const formatDuration = (value) => {
-  if (value == null || value === "" || value === "N/A") return null;
-  return String(value);
-};
-
 export const ContactDialog = ({
   openContactDialog,
   handleContactDialogClose,
   contacts = [],
   ZOHO,
-  handleDelete,
   selectedRowData,
-  formData,
-  selectedOwner,
-  historyContacts = [],
-  currentModuleData,
-  sourceMatterId,
   onRecordMoved,
 }) => {
   const [selectedContactId, setSelectedContactId] = useState(null);
@@ -153,6 +132,7 @@ export const ContactDialog = ({
   const [searchText, setSearchText] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
+  const [acknowledgedSavedVersion, setAcknowledgedSavedVersion] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
@@ -168,6 +148,7 @@ export const ContactDialog = ({
       setSelectedContactId(null);
       setSearchText("");
       setIsSearching(false);
+      setAcknowledgedSavedVersion(false);
     }
   }, [openContactDialog]);
 
@@ -232,226 +213,51 @@ export const ContactDialog = ({
   };
 
   const handleContactSelect = async () => {
-    if (!selectedContactId) {
+    if (!acknowledgedSavedVersion) return;
+    if (!selectedContactId || !selectedRowData?.id) {
       setSnackbar({
         open: true,
-        message: "Please select a contact.",
-        severity: "warning",
-      });
-      return;
-    }
-
-    if (!selectedRowData?.id) {
-      setSnackbar({
-        open: true,
-        message: "History record data is missing. Please close and try again.",
+        message: "Select a Contact and reopen the History entry if its record ID is missing.",
         severity: "error",
       });
       return;
     }
 
     const selectedContact =
-      displayContacts.find((c) => c.id === selectedContactId) ||
-      contacts.find((c) => c.id === selectedContactId);
-
+      displayContacts.find((contact) => String(contact.id) === String(selectedContactId)) ||
+      contacts.find((contact) => String(contact.id) === String(selectedContactId));
     if (!selectedContact) {
-      setSnackbar({
-        open: true,
-        message: "Selected contact not found.",
-        severity: "error",
-      });
+      setSnackbar({ open: true, message: "Selected Contact was not found.", severity: "error" });
       return;
     }
 
     setIsMoving(true);
     try {
-      const contactsToLink = new Map();
-      const addContact = (contact) => {
-        const id = getContactId(contact);
-        if (!id) return;
-        const key = String(id);
-        if (!contactsToLink.has(key)) {
-          contactsToLink.set(key, { ...contact, id: key });
-        }
-      };
-
-      (Array.isArray(historyContacts) ? historyContacts : []).forEach(addContact);
-      (Array.isArray(formData?.Participants) ? formData.Participants : []).forEach(addContact);
-
-      try {
-        const relatedParticipants = await ZOHO.CRM.API.getRelatedRecords({
-          Entity: "Applications_History",
-          RecordID: selectedRowData.id,
-          RelatedList: "Contacts4",
-          page: 1,
-          per_page: 200,
-        });
-        (relatedParticipants?.data || []).forEach((record) => {
-          addContact({
-            id: record?.Contact?.id,
-            Full_Name: record?.Contact?.name,
-          });
-        });
-      } catch (relatedError) {
-        console.warn("Could not fetch Contacts4 participants for move:", relatedError);
-      }
-
-      addContact(selectedContact);
-
-      if (contactsToLink.size === 0) {
-        setSnackbar({
-          open: true,
-          message: "No contacts associated with this history. Please add at least one contact.",
-          severity: "error",
-        });
-        return;
-      }
-
-      const linkedContacts = Array.from(contactsToLink.values());
-      const joinedNames = linkedContacts
-        .map(getContactName)
-        .filter(Boolean)
-        .join(", ");
-      const historyName =
-        getContactName(selectedContact) || joinedNames || "Contact History";
-
-      const stakeHolder =
-        formData?.stakeHolder ??
-        formData?.stakeHolder ??
-        selectedRowData?.stakeHolder ??
-        selectedRowData?.stakeHolder;
-      const stakeholderId =
-        stakeHolder && typeof stakeHolder === "object"
-          ? stakeHolder.id ?? stakeHolder.Id ?? stakeHolder.ID
-          : null;
-      const stakeholderForApi =
-        stakeholderId != null ? { id: String(stakeholderId) } : null;
-
-      const ownerForApi = selectedOwner?.id
-        ? { id: selectedOwner.id }
-        : selectedRowData?.Owner?.id
-          ? { id: selectedRowData.Owner.id }
-          : null;
-
-      const dateValue = formData?.date_time ?? formData?.date_time ?? selectedRowData?.date_time;
-      const formattedDate = dateValue
-        ? dayjs(dateValue).format("YYYY-MM-DDTHH:mm:ssZ")
-        : null;
-
-      const apiData = {
-        Name: historyName,
-        History_Details_Plain: formData?.details ?? selectedRowData?.details ?? "",
-        History_Result: formData?.result ?? selectedRowData?.result ?? "",
-        History_Type: formData?.type ?? selectedRowData?.type ?? "",
-        Regarding: formData?.regarding ?? selectedRowData?.regarding ?? "",
-        Duration: formatDuration(formData?.duration ?? selectedRowData?.duration),
-        Date: formattedDate,
-        Stakeholder: stakeholderForApi,
-        ...(ownerForApi ? { Owner: ownerForApi } : {}),
-      };
-
-      const currentApplicationId = sourceMatterId || currentModuleData?.id;
-      const matterFields = currentApplicationId
-        ? {
-            Matter: { id: currentApplicationId },
-            Matter_No: formData?.matterNo || currentModuleData?.Name || null,
-            Current_Stage: formData?.currentStage ?? currentModuleData?.Current_Stage ?? null,
-            Matter_Progress: formatMultiSelect(
-              formData?.matterProgress ?? currentModuleData?.Matter_Progress
-            ),
-            Billing_Type: formData?.billingType || "Billable",
-          }
-        : {};
-
-      const insertHistory1 = (payload) =>
-        ZOHO.CRM.API.insertRecord({
-          Entity: "History1",
-          APIData: payload,
-          Trigger: ["workflow"],
-        });
-
-      let createContactHistory = await insertHistory1({ ...apiData, ...matterFields });
-      if (
-        createContactHistory?.data?.[0]?.code !== "SUCCESS" &&
-        Object.keys(matterFields).length > 0
-      ) {
-        createContactHistory = await insertHistory1(apiData);
-      }
-
-      if (createContactHistory?.data?.[0]?.code === "SUCCESS") {
-        const newHistoryId = createContactHistory.data[0].details.id;
-
-        for (const contact of linkedContacts) {
-          const contactId = getContactId(contact);
-          if (!contactId) continue;
-          try {
-            await ZOHO.CRM.API.insertRecord({
-              Entity: "History_X_Contacts",
-              APIData: {
-                Contact_History_Info: { id: newHistoryId },
-                Contact_Details: { id: contactId },
-              },
-              Trigger: ["workflow"],
-            });
-          } catch (juncError) {
-            console.error(
-              `Error inserting History_X_Contacts for contact ID ${contactId}:`,
-              juncError
-            );
-          }
-        }
-
-        let attachmentWarning = false;
-        try {
-          await ZOHO.CRM.FUNCTIONS.execute(
-            "copy_attachment_form_contact_history_to_applicatio",
-            {
-              arguments: JSON.stringify({
-                fromModule: "Applications_History",
-                toModule: "History1",
-                fromID: selectedRowData.id,
-                ToID: newHistoryId,
-              }),
-            }
-          );
-        } catch (funcError) {
-          attachmentWarning = true;
-          console.warn("Attachment copy function warning/error:", funcError);
-        }
-
-        await handleDelete();
-
-        setSnackbar({
-          open: true,
-          message: attachmentWarning
-            ? "History moved to Contact, but attachments may be missing."
-            : "History moved to Contact successfully!",
-          severity: attachmentWarning ? "warning" : "success",
-        });
-
-        if (onRecordMoved) {
-          onRecordMoved(selectedRowData.id);
-        }
-
-        handleContactDialogClose();
-      } else {
-        const errMsg =
-          createContactHistory?.data?.[0]?.message ||
-          "Failed to create Contact history.";
-        throw new Error(errMsg);
-      }
+      await moveApplicationHistoryToMain({
+        ZOHO,
+        sourceId: selectedRowData.id,
+        destination: "contact",
+        destinationId: selectedContactId,
+        destinationName: getContactName(selectedContact),
+      });
+      if (onRecordMoved) onRecordMoved(selectedRowData.id);
+      setSnackbar({ open: true, message: "History moved to Contact successfully.", severity: "success" });
+      handleContactDialogClose();
     } catch (error) {
-      console.error("Error moving history to Contact:", error);
+      console.error("Error moving History to Contact:", error);
+      if (error.sourceDeleted) {
+        if (onRecordMoved) onRecordMoved(selectedRowData.id);
+        handleContactDialogClose();
+      }
       setSnackbar({
         open: true,
-        message: `Failed to move history: ${error.message || "Unknown error"}`,
-        severity: "error",
+        message: error.message || "History move failed.",
+        severity: error.sourceDeleted ? "warning" : "error",
       });
     } finally {
       setIsMoving(false);
     }
   };
-
   return (
     <>
       <MUIDialog
@@ -485,6 +291,9 @@ export const ContactDialog = ({
               <CircularProgress size={48} />
             </Box>
           )}
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This move uses the last saved History entry. Unsaved changes in the edit form will be lost. Save them first, then reopen the entry to move it.
+          </Alert>
           <Box display="flex" gap={2} mb={2}>
             <TextField
               select
@@ -531,6 +340,17 @@ export const ContactDialog = ({
             selectedContactId={selectedContactId}
             setSelectedContactId={setSelectedContactId}
           />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={acknowledgedSavedVersion}
+                onChange={(event) => setAcknowledgedSavedVersion(event.target.checked)}
+                disabled={isMoving}
+              />
+            }
+            label="I understand that unsaved changes will not move."
+            sx={{ mt: 1 }}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={handleContactDialogClose} color="secondary" disabled={isMoving} sx={commonStyles}>
@@ -540,7 +360,7 @@ export const ContactDialog = ({
             onClick={handleContactSelect}
             color="primary"
             variant="contained"
-            disabled={!selectedContactId || isMoving}
+            disabled={!selectedContactId || !acknowledgedSavedVersion || isMoving}
             sx={{ ...commonStyles, display: "flex", alignItems: "center", gap: 1 }}
           >
             {isMoving && <CircularProgress size={16} color="inherit" />}

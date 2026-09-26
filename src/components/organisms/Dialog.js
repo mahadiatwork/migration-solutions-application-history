@@ -52,6 +52,7 @@ import { styled } from "@mui/material/styles";
 import { zohoApi } from "../../zohoApi";
 import ApplicationDialog from "./ApplicationTable";
 import ContactDialog from "./ContactTable";
+import StakeholderMoveDialog from "./StakeholderMoveDialog";
 import Stakeholder from "../atoms/Stakeholder";
 import { Close } from "@mui/icons-material";
 import { MATTERS_MODULE } from "../../config/config";
@@ -150,6 +151,7 @@ export function Dialog({
 
   const [, setHistoryName] = React.useState("");
   const [historyContacts, setHistoryContacts] = React.useState([]);
+  const [openStakeholderMoveDialog, setOpenStakeholderMoveDialog] = React.useState(false);
   const [selectedOwner, setSelectedOwner] = React.useState(
     ownerList?.find(
       (owner) => owner?.full_name === selectedRowData?.ownerName
@@ -1338,7 +1340,7 @@ export function Dialog({
         <DialogActions
           sx={{ display: "flex", justifyContent: "space-between" }}
         >
-          {selectedRowData !== undefined ? (
+          {selectedRowData?.id ? (
             <div style={{ display: "flex", gap: "8px" }}>
               <Button
                 onClick={handleDelete}
@@ -1368,6 +1370,15 @@ export function Dialog({
                   Move to Contact
                 </Button>
               )}
+              <Button
+                onClick={() => setOpenStakeholderMoveDialog(true)}
+                variant="outlined"
+                color="success"
+                disabled={isSubmitting}
+                sx={{ fontSize: "9pt", textTransform: "none", padding: "4px 8px" }}
+              >
+                Move to Stakeholder
+              </Button>
               {handleMoveToApplication && (
                 <Button
                   onClick={handleMoveToApplication}
@@ -1425,16 +1436,17 @@ export function Dialog({
         handleContactDialogClose={() => setOpenContactDialog && setOpenContactDialog(false)}
         contacts={contacts}
         ZOHO={ZOHO}
-        handleDelete={handleDelete}
         selectedRowData={selectedRowData}
-        formData={formData}
-        selectedOwner={selectedOwner}
-        historyContacts={[
-          ...(Array.isArray(historyContacts) ? historyContacts : []),
-          ...(Array.isArray(selectedParticipants) ? selectedParticipants : []),
-        ]}
-        currentModuleData={currentModuleData}
-        sourceMatterId={sourceMatterId}
+        onRecordMoved={(movedId) => {
+          if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
+        }}
+      />
+      <StakeholderMoveDialog
+        open={openStakeholderMoveDialog}
+        onClose={() => setOpenStakeholderMoveDialog(false)}
+        ZOHO={ZOHO}
+        selectedRowData={selectedRowData}
+        suggestedStakeholder={formData.stakeHolder}
         onRecordMoved={(movedId) => {
           if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
         }}
