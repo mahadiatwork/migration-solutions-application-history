@@ -86,4 +86,26 @@ describe("Application History Matter summary", () => {
       mergeApplicationHistoryRows(previous, [{ id: "history-1", currentStage: "" }])
     ).toEqual([{ ...previous[0], currentStage: "" }]);
   });
+
+  test("a stale related-list response cannot erase a newly created row", () => {
+    const optimistic = {
+      id: "history-new",
+      details: "Created locally",
+      _optimistic: true,
+    };
+
+    expect(mergeApplicationHistoryRows([optimistic], [])).toEqual([optimistic]);
+
+    expect(
+      mergeApplicationHistoryRows([optimistic], [
+        { id: "history-new", details: "Returned by Zoho" },
+      ])
+    ).toEqual([{ id: "history-new", details: "Returned by Zoho" }]);
+  });
+
+  test("missing non-optimistic rows are removed by a server refresh", () => {
+    expect(
+      mergeApplicationHistoryRows([{ id: "history-deleted", details: "Old" }], [])
+    ).toEqual([]);
+  });
 });

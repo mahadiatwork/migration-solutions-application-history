@@ -330,9 +330,12 @@ const App = () => {
 
   const handleRecordAdded = (newRecord) => {
     // Normalize the new record to match the existing structure
+    const newParticipants = Array.isArray(newRecord?.Participants)
+      ? newRecord.Participants
+      : [];
     let participantsArray = [];
-    if (newRecord.Participants.length > 0) {
-      participantsArray = newRecord.Participants.map((participant) => ({
+    if (newParticipants.length > 0) {
+      participantsArray = newParticipants.map((participant) => ({
         id: participant.id || "N/A",
         Full_Name: participant.Full_Name || "Unknown",
         Email: participant.Email || "No Email",
@@ -364,6 +367,8 @@ const App = () => {
       matterProgress: newRecord.Matter_Progress ?? "",
       billingType: newRecord.Billing_Type ?? "Billable",
       Participants: participantsArray,
+      // Keep this row visible until Zoho's related-list API has indexed it.
+      _optimistic: true,
     };
 
     // Show the new record immediately. Zoho's related list can take a moment to
@@ -378,7 +383,7 @@ const App = () => {
 
     setRegarding(normalizedRecord.regarding || "No Regarding");
     setDetails(normalizedRecord.details || "No Details");
-    setSelectedContacts(newRecord.Participants);
+    setSelectedContacts(newParticipants);
     // Debug logs
 
   };

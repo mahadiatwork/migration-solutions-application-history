@@ -68,11 +68,36 @@ export const buildApplicationHistorySummary = (formData, progressFieldType) => {
   };
 };
 
-/** The list query is sparse; its rows must not erase saved snapshot fields. */
+/**
+ * The list query is sparse, and newly created records can take a moment to
+ * appear in Zoho's related-list response. Preserve only explicitly optimistic
+ * rows that the server has not returned yet; ordinary missing rows remain
+ * removable so deletes do not linger in the widget.
+ */
 export const mergeApplicationHistoryRows = (previousRows = [], incomingRows = []) => {
-  const previousById = new Map(previousRows.map((row) => [row.id, row]));
-  return incomingRows.map((row) => ({
-    ...(previousById.get(row.id) || {}),
-    ...row,
-  }));
+  const rowKey = (row) => (row?.id == null ? null : String(row.id));
+  const previousById = new Map(
+    previousRows
+      .map((row) => [rowKey(row), row])
+      .filter(([id]) => id !== null)
+  );
+  const incomingIds = new Set(
+    incomingRows.map(rowKey).filter((id) => id !== null)
+  );
+
+  const pendingRows = previousRows.filter((row) => {
+    const id = rowKey(row);
+    return row?._optimistic === true && id !== null && !incomingIds.has(id);
+  });
+
+  const serverRows = incomingRows.map((row) => {
+    const merged = {
+      ...(previousById.get(rowKey(row)) || {}),
+      ...row,
+    };
+    delete merged._optimistic;
+    return merged;
+  });
+
+  return [...pendingRows, ...serverRows];
 };
