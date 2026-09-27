@@ -155,17 +155,11 @@ const App = () => {
     try {
       let data = [];
       if (module === "Applications" || module === "Application" || module === "Deals") {
-        try {
-          data = await zohoApi.record.fetchApplicationHistoryViaCoqlV8(recordId, 2000, 0);
-        } catch (coqlError) {
-          console.warn("COQL v8 failed, falling back to getRelatedRecords:", coqlError);
-          const resp = await zohoApi.record.getRecordsFromRelatedList({
-            module,
-            recordId,
-            RelatedListAPI: "Application_History",
-          });
-          data = resp?.data || [];
-        }
+        data = await zohoApi.record.fetchApplicationHistory(
+          module,
+          recordId,
+          2000
+        );
       } else {
         const resp = await zohoApi.record.getRecordsFromRelatedList({
           module,
@@ -372,10 +366,12 @@ const App = () => {
       Participants: participantsArray,
     };
 
-    // Add the normalized record to the top of the table
-    const finalData = [normalizedRecord, ...relatedListData];
-
-    setRelatedListData(finalData);
+    // Show the new record immediately. Zoho's related list can take a moment to
+    // expose a new record, so do not replace this row with an immediate refetch.
+    setRelatedListData((previous) => [
+      normalizedRecord,
+      ...previous.filter((record) => record.id !== normalizedRecord.id),
+    ]);
 
     // Highlight the newly added record
     setHighlightedRecordId(newRecord.id);
@@ -385,8 +381,6 @@ const App = () => {
     setSelectedContacts(newRecord.Participants);
     // Debug logs
 
-    // Background refetch after create
-    fetchRLData({ isBackground: true });
   };
 
   const handleRightSideDataShow = (currentRegarding, currentDetails) => {
