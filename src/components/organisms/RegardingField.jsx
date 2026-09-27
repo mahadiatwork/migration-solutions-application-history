@@ -5,17 +5,17 @@ import { getRegardingOptions, shouldOfferManualOther } from "./helperFunc";
 const RegardingField = ({ formData, handleInputChange, selectedRowData, picklistConfig }) => {
   const existingValue = formData?.regarding ?? selectedRowData?.regarding ?? "";
   const configuredOptions = React.useMemo(
-    () => getRegardingOptions(formData?.type, undefined, picklistConfig),
-    [formData?.type, picklistConfig]
+    () => getRegardingOptions(formData?.result, undefined, picklistConfig),
+    [formData?.result, picklistConfig]
   );
   const predefinedOptions = React.useMemo(
     () =>
       getRegardingOptions(
-        formData?.type,
+        formData?.result,
         selectedRowData ? existingValue : undefined,
         picklistConfig
       ),
-    [existingValue, formData?.type, picklistConfig, selectedRowData]
+    [existingValue, formData?.result, picklistConfig, selectedRowData]
   );
   const manualOtherEnabled = shouldOfferManualOther(
     picklistConfig,
@@ -28,15 +28,15 @@ const RegardingField = ({ formData, handleInputChange, selectedRowData, picklist
   const [selectedValue, setSelectedValue] = useState("");
   const [manualInput, setManualInput] = useState("");
   const [showManualInput, setShowManualInput] = useState(false); // New state to control visibility
-  const previousType = useRef(formData?.type);
+  const previousActivityType = useRef(formData?.result);
 
   useEffect(() => {
-    const typeChanged = previousType.current !== formData?.type;
-    previousType.current = formData?.type;
+    const activityTypeChanged = previousActivityType.current !== formData?.result;
+    previousActivityType.current = formData?.result;
 
     // Manual text is mirrored into formData, so do not collapse the editor on
     // every keystroke.
-    if (!typeChanged && manualOtherEnabled && showManualInput) return;
+    if (!activityTypeChanged && manualOtherEnabled && showManualInput) return;
 
     if (existingValue) {
       if (predefinedOptions.includes(existingValue)) {
@@ -59,7 +59,7 @@ const RegardingField = ({ formData, handleInputChange, selectedRowData, picklist
       setManualInput("");
       setShowManualInput(false);
     }
-  }, [existingValue, formData?.type, manualOtherEnabled, predefinedOptions, showManualInput]);
+  }, [existingValue, formData?.result, manualOtherEnabled, predefinedOptions, showManualInput]);
   
 
   const handleSelectChange = (event) => {

@@ -877,8 +877,17 @@ export function Dialog({
           {matterLoadError && (
             <Alert severity="error">{matterLoadError}</Alert>
           )}
-          <Grid container spacing={1}>
-            <Grid item xs={12} sm={3}>
+          <Grid
+            container
+            columns={24}
+            spacing={1}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "9pt" },
+              "& .MuiInputBase-input": { fontSize: "9pt" },
+              "& .MuiSelect-select": { fontSize: "9pt" },
+            }}
+          >
+            <Grid item xs={24} sm={4}>
               <TextField
                 fullWidth
                 variant="standard"
@@ -887,7 +896,7 @@ export function Dialog({
                 InputProps={{ readOnly: true }}
               />
             </Grid>
-            <Grid item xs={12} sm={3}>
+            <Grid item xs={24} sm={7}>
               <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
                 <InputLabel>Current Stage</InputLabel>
                 <Select
@@ -895,14 +904,14 @@ export function Dialog({
                   onChange={(event) => handleCurrentStageChange(event.target.value)}
                   label="Current Stage"
                 >
-                  <MenuItem value=""><em>None</em></MenuItem>
+                  <MenuItem value="" sx={{ fontSize: "9pt" }}><em>None</em></MenuItem>
                   {currentStageOptions.map((stage) => (
-                    <MenuItem key={stage} value={stage}>{stage}</MenuItem>
+                    <MenuItem key={stage} value={stage} sx={{ fontSize: "9pt" }}>{stage}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} sm={3}>
+            <Grid item xs={24} sm={7}>
               <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
                 <InputLabel>Matter Progress</InputLabel>
                 <Select
@@ -912,21 +921,23 @@ export function Dialog({
                   }
                   label="Matter Progress"
                 >
-                  <MenuItem value=""><em>None</em></MenuItem>
+                  <MenuItem value="" sx={{ fontSize: "9pt" }}><em>None</em></MenuItem>
                   {currentProgressOptions.map((progress) => (
-                    <MenuItem key={progress} value={progress}>{progress}</MenuItem>
+                    <MenuItem key={progress} value={progress} sx={{ fontSize: "9pt" }}>{progress}</MenuItem>
                   ))}
                 </Select>
                 {!isMatterLoading && formData.currentStage && currentProgressOptions.length === 0 && (
                   <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
                     {matterMetadata.dependencyError
-                      ? "Matter Progress rules could not be loaded. The CRM connection may need map_dependency.READ access."
+                      ? matterMetadata.dependencyError.startsWith("OAUTH_SCOPE_MISMATCH")
+                        ? "Matter Progress rules could not be loaded. Reauthorize zoho_crm_conn with ZohoCRM.settings.map_dependency.READ access."
+                        : "Matter Progress rules could not be loaded. Please retry or contact your CRM administrator."
                       : "No Matter Progress values are mapped to this Current Stage in Zoho."}
                   </Typography>
                 )}
               </FormControl>
             </Grid>
-            <Grid item xs={12} sm={3}>
+            <Grid item xs={24} sm={6}>
               <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
                 <InputLabel>Billing Type</InputLabel>
                 <Select
@@ -937,7 +948,7 @@ export function Dialog({
                   label="Billing Type"
                 >
                   {billingTypeOptions.map((billingType) => (
-                    <MenuItem key={billingType} value={billingType}>
+                    <MenuItem key={billingType} value={billingType} sx={{ fontSize: "9pt" }}>
                       {billingType}
                     </MenuItem>
                   ))}
@@ -957,15 +968,18 @@ export function Dialog({
                   value={formData.type || ""} // Ensure a fallback value
                   onChange={(e) => {
                     const type = e.target.value;
-                    handleInputChange("type", type);
                     const results = getResultOptions(type, picklistConfig);
-                    handleInputChange(
-                      "result",
-                      results[0] || resultMapping[type] || ""
-                    );
+                    const nextResult =
+                      results[0] || resultMapping[type] || "";
+                    handleInputChange("type", type);
+                    handleInputChange("result", nextResult);
                     handleInputChange(
                       "regarding",
-                      getRegardingOptions(type, undefined, picklistConfig)[0] || ""
+                      getRegardingOptions(
+                        nextResult,
+                        undefined,
+                        picklistConfig
+                      )[0] || ""
                     );
                   }}
                   label="Category"
@@ -996,6 +1010,14 @@ export function Dialog({
                   onChange={(e) => {
                     const selectedResult = e.target.value;
                     handleInputChange("result", selectedResult);
+                    handleInputChange(
+                      "regarding",
+                      getRegardingOptions(
+                        selectedResult,
+                        undefined,
+                        picklistConfig
+                      )[0] || ""
+                    );
                   }}
                   label="Activity Type"
                   sx={{

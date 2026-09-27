@@ -123,6 +123,29 @@ const selectLayout = (layouts, matter) => {
   return layouts.find((layout) => layout?.status !== "deactivated") || layouts[0];
 };
 
+const getLayoutStageValues = (layout) => {
+  const stageField = flattenLayoutFields(layout).find(
+    (field) => field?.api_name === MATTER_SOURCE_FIELDS.currentStage
+  );
+  return stageField?.pick_list_values || stageField?.picklist_values || [];
+};
+
+const hasCompleteLayoutDependencyMap = (response, matter) => {
+  const layout = selectLayout(extractLayouts(response), matter);
+  if (!layout) return false;
+  const stages = getLayoutStageValues(layout).filter(isAvailablePicklistValue);
+  return (
+    stages.length > 0 &&
+    stages.every((stage) => Array.isArray(stage?.maps)) &&
+    stages.some((stage) =>
+      stage.maps.some(
+        (progress) =>
+          isAvailablePicklistValue(progress) && normalizePicklistValue(progress)
+      )
+    )
+  );
+};
+
 const dependencyMapFromValues = (pickListValues = []) => {
   const progressByStage = {};
   pickListValues
@@ -162,7 +185,7 @@ export const extractMatterLayoutMetadata = (response, matter = null) => {
   const progressField = fields.find(
     (field) => field?.api_name === MATTER_SOURCE_FIELDS.matterProgress
   );
-  const stageValues = stageField?.pick_list_values || stageField?.picklist_values || [];
+  const stageValues = getLayoutStageValues(layout);
   return {
     layoutId: String(layout.id ?? getMatterLayoutId(matter) ?? "") || null,
     stages: extractPicklistOptions(stageField),
@@ -227,16 +250,21 @@ export const getStageOptions = (metadata, currentValue) =>
 export const getProgressOptions = (metadata, stage, currentValue) => {
   const normalizedStage = normalizePicklistValue(stage);
   const progressByStage = metadata?.progressByStage || {};
+  const hasDependencyRules = Object.keys(progressByStage).length > 0;
   const hasMappedStage = Object.prototype.hasOwnProperty.call(
     progressByStage,
     normalizedStage
   );
-  // Keep a stored historical value visible on edit. For a selected stage,
-  // only mapped values are available for new selections.
+  // Keep a stored historical value visible on edit. Use stage-specific values
+  // when Zoho supplied dependency rules. If those rules are unavailable (or no
+  // dependency is configured), keep the field usable with the layout's full
+  // Matter Progress picklist instead of presenting an empty dropdown.
   const baseOptions = normalizedStage
     ? hasMappedStage
       ? progressByStage[normalizedStage]
-      : []
+      : hasDependencyRules
+        ? []
+        : metadata?.progress || []
     : metadata?.progress || [];
   return withCurrentPicklistValue(baseOptions, currentValue);
 };
@@ -340,7 +368,12 @@ export const fetchMatterPicklistMetadata = async (matter = null) => {
       progressByStage: {},
     };
     let dependencyError = null;
-    if (layoutMetadata.layoutId) {
+    // Skip the scope-gated request only when every available stage explicitly
+    // supplies maps and at least one stage maps to a progress value.
+    if (
+      layoutMetadata.layoutId &&
+      !hasCompleteLayoutDependencyMap(layoutsResponse, matter)
+    ) {
       try {
         const dependencyResponse = await fetchMappedDependency(
           layoutMetadata.layoutId
