@@ -164,6 +164,7 @@ test("moves directly to Stakeholder History without requiring a Contact", async 
   expect(crm.state.payload.Stakeholder).toEqual({ id: "stakeholder-2" });
   expect(crm.state.targetContacts).toEqual([]);
   expect(crm.state.deleted).toBe(true);
+  expect(crm.ZOHO.CRM.FUNCTIONS.execute).not.toHaveBeenCalled();
 });
 
 test("uses the widget's Billable default for a legacy record without Billing Type", async () => {

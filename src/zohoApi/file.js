@@ -57,7 +57,16 @@ export function parseAttachmentListResponse(response, strict = false) {
     }
   }
 
-  const candidates = [status, details, response].filter(
+  const containers = [status, details, response].filter(
+    (value) => value && typeof value === "object"
+  );
+  const nestedItems = containers.flatMap((value) =>
+    Array.isArray(value?.data) ? value.data : []
+  );
+  const directItems = [status, response]
+    .filter(Array.isArray)
+    .flat();
+  const candidates = [...containers, ...nestedItems, ...directItems].filter(
     (value) => value && typeof value === "object"
   );
   const failure = candidates.find((value) =>
@@ -73,6 +82,9 @@ export function parseAttachmentListResponse(response, strict = false) {
     const info = candidates.find((value) => value.info)?.info;
     return info ? { data: status, error: null, info } : { data: status, error: null };
   }
+  if (Array.isArray(response)) {
+    return { data: response, error: null };
+  }
   const dataContainer = candidates.find((value) => Array.isArray(value.data));
   if (dataContainer) {
     const info = dataContainer.info || candidates.find((value) => value.info)?.info;
@@ -84,65 +96,103 @@ export function parseAttachmentListResponse(response, strict = false) {
   const noContent = candidates.some((value) =>
     Number(value.statusCode) === 204 ||
     value.code === "NO_CONTENT" ||
-    String(value.statusText || "").toLowerCase() === "nocontent"
+    String(value.statusText || "").replace(/[\s_-]/g, "").toLowerCase() === "nocontent"
   ) || (typeof status === "string" && /^no[ -]?content$/i.test(status.trim()));
   if (noContent || !strict) return { data: [], error: null };
   return { data: null, error: "CRM did not return a readable attachment list." };
 }
 
+const collectAttachmentPages = async (readPage, strict) => {
+  const allAttachments = [];
+  const seenIds = new Set();
+  const lastPage = strict ? MAX_ATTACHMENT_PAGES : 1;
+  for (let page = 1; page <= lastPage; page += 1) {
+    const response = await readPage(page);
+    const parsed = parseAttachmentListResponse(response, strict);
+    if (parsed.error) return { data: null, error: parsed.error };
+    const rows = parsed.data;
+    let moreRecords = parsed.info?.more_records;
+
+    if (!strict) return { data: rows, error: null };
+    if (typeof moreRecords === "string") {
+      const normalized = moreRecords.trim().toLowerCase();
+      if (normalized === "true" || normalized === "false") {
+        moreRecords = normalized === "true";
+      }
+    }
+    if (moreRecords != null && typeof moreRecords !== "boolean") {
+      return { data: null, error: "CRM returned an invalid attachment pagination flag." };
+    }
+    if (parsed.info?.page != null && Number(parsed.info.page) !== page) {
+      return { data: null, error: "CRM returned the wrong attachment page." };
+    }
+    if (page > 1 && rows.length === 0) {
+      return { data: null, error: "CRM returned an empty attachment page after reporting more records." };
+    }
+    if (moreRecords === true && rows.length === 0) {
+      return { data: null, error: "CRM reported more attachments but returned an empty page." };
+    }
+    for (const row of rows) {
+      if (!row?.id || seenIds.has(String(row.id))) {
+        return { data: null, error: "CRM returned missing or repeated attachment IDs." };
+      }
+      seenIds.add(String(row.id));
+    }
+    allAttachments.push(...rows);
+    if (moreRecords === true) {
+      if (page === MAX_ATTACHMENT_PAGES) {
+        return { data: null, error: "CRM attachment list exceeds the supported page limit." };
+      }
+      continue;
+    }
+    if (moreRecords !== false && rows.length === ATTACHMENTS_PER_PAGE) {
+      return { data: null, error: "CRM omitted pagination details for a full attachment page." };
+    }
+    return { data: allAttachments, error: null };
+  }
+  return { data: null, error: "CRM attachment list exceeds the supported page limit." };
+};
+
 async function getAttachments({ module, recordId, strict = false }) {
   try {
-    const allAttachments = [];
-    const seenIds = new Set();
-    const lastPage = strict ? MAX_ATTACHMENT_PAGES : 1;
-    for (let page = 1; page <= lastPage; page += 1) {
+    const crm = (window.ZOHO || ZOHO)?.CRM;
+    if (typeof crm?.API?.getRelatedRecords === "function") {
+      const result = await collectAttachmentPages(
+        (page) => crm.API.getRelatedRecords({
+          Entity: module,
+          RecordID: recordId,
+          RelatedList: "Attachments",
+          page,
+          per_page: ATTACHMENTS_PER_PAGE,
+        }),
+        strict
+      );
+      return result;
+    }
+
+    if (strict) {
+      return {
+        data: null,
+        error: "The active CRM attachment API is unavailable.",
+      };
+    }
+
+    const result = await collectAttachmentPages(async (page) => {
       const pagination = strict ? `&page=${page}&per_page=${ATTACHMENTS_PER_PAGE}` : "";
       const url = `${dataCenterMap.AU}/crm/v6/${module}/${recordId}/Attachments?fields=id,File_Name,$file_id${pagination}`;
-      const response = await (window.ZOHO || ZOHO).CRM.CONNECTION.invoke(conn_name, {
+      return crm.CONNECTION.invoke(conn_name, {
         url,
         param_type: 1,
         headers: {},
         method: "GET",
       });
-      const parsed = parseAttachmentListResponse(response, strict);
-      if (parsed.error) return { data: null, error: parsed.error };
-      const rows = parsed.data;
-      const moreRecords = parsed.info?.more_records;
-
-      if (!strict) return { data: rows, error: null };
-      if (parsed.info?.page != null && Number(parsed.info.page) !== page) {
-        return { data: null, error: "CRM returned the wrong attachment page." };
-      }
-      if (page > 1 && rows.length === 0) {
-        return { data: null, error: "CRM returned an empty attachment page after reporting more records." };
-      }
-      if (moreRecords === true && rows.length === 0) {
-        return { data: null, error: "CRM reported more attachments but returned an empty page." };
-      }
-      for (const row of rows) {
-        if (!row?.id || seenIds.has(String(row.id))) {
-          return { data: null, error: "CRM returned missing or repeated attachment IDs." };
-        }
-        seenIds.add(String(row.id));
-      }
-      allAttachments.push(...rows);
-      if (moreRecords === true) {
-        if (page === MAX_ATTACHMENT_PAGES) {
-          return { data: null, error: "CRM attachment list exceeds the supported page limit." };
-        }
-        continue;
-      }
-      if (moreRecords !== false && rows.length === ATTACHMENTS_PER_PAGE) {
-        return { data: null, error: "CRM omitted pagination details for a full attachment page." };
-      }
-      return { data: allAttachments, error: null };
-    }
-    return { data: null, error: "CRM attachment list exceeds the supported page limit." };
+    }, strict);
+    return result;
   } catch (getAttachmentsError) {
     console.log({ getAttachmentsError });
     return {
       data: null,
-      error: "Something went wrong",
+      error: getAttachmentsError?.message || "Something went wrong",
     };
   }
 }

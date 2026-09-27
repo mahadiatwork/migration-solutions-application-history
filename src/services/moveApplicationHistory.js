@@ -87,7 +87,8 @@ const restoreSourceLinks = async (api, sourceId, originalLinks) => {
 const checkedAttachments = async (listAttachments, module, id) => {
   const response = await listAttachments({ module, recordId: id, strict: true });
   if (response?.error || !Array.isArray(response?.data)) {
-    throw new Error(`Could not verify attachments for ${module} record ${id}.`);
+    const reason = response?.error ? ` ${response.error}` : "";
+    throw new Error(`Could not verify attachments for ${module} record ${id}.${reason}`);
   }
   return response.data;
 };

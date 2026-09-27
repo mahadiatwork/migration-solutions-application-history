@@ -53,73 +53,231 @@ test("strict attachment parser exposes pagination and accepts code 200", () => {
   });
 });
 
-test("strict attachment reads collect every page", async () => {
-  const firstPage = Array.from({ length: 200 }, (_, index) => attachment(`a-${index}`));
-  invoke.mockResolvedValueOnce(pageResponse(firstPage, true, 1));
-  invoke.mockResolvedValueOnce(pageResponse([attachment("a-200")], false, 2));
+test("strict attachment parser rejects an SDK error inside the data array", () => {
+  expect(parseAttachmentListResponse({
+    data: [{ code: "AUTHORIZATION_FAILED", message: "Attachment access denied" }],
+  }, true)).toEqual({ data: null, error: "Attachment access denied" });
+});
+
+test("strict attachment reads use the active CRM environment", async () => {
+  const getRelatedRecords = jest.fn().mockResolvedValue({
+    data: [attachment("sandbox-attachment")],
+    info: { page: 1, per_page: 200, more_records: false },
+  });
+  window.ZOHO.CRM.API = { getRelatedRecords };
 
   const result = await file.getAttachments({
     module: "Applications_History",
-    recordId: "history-1",
+    recordId: "sandbox-history",
     strict: true,
   });
-  expect(result.error).toBeNull();
-  expect(result.data).toHaveLength(201);
-  expect(result.data[200].id).toBe("a-200");
-  expect(invoke).toHaveBeenCalledTimes(2);
-  expect(invoke.mock.calls[0][1].url).toContain("page=1&per_page=200");
-  expect(invoke.mock.calls[1][1].url).toContain("page=2&per_page=200");
+
+  expect(result).toEqual({
+    data: [attachment("sandbox-attachment")],
+    error: null,
+  });
+  expect(getRelatedRecords).toHaveBeenCalledWith({
+    Entity: "Applications_History",
+    RecordID: "sandbox-history",
+    RelatedList: "Attachments",
+    page: 1,
+    per_page: 200,
+  });
+  expect(invoke).not.toHaveBeenCalled();
 });
 
-test("strict attachment reads reject a full page without pagination info", async () => {
-  invoke.mockResolvedValue({
-    details: { statusCode: 200, statusMessage: JSON.stringify({
-      data: Array.from({ length: 200 }, (_, index) => attachment(`a-${index}`)),
-    }) },
+test("strict active-environment reads collect every attachment page", async () => {
+  const firstPage = Array.from(
+    { length: 200 },
+    (_, index) => attachment(`sdk-${index}`)
+  );
+  const getRelatedRecords = jest
+    .fn()
+    .mockResolvedValueOnce({
+      data: firstPage,
+      info: { page: 1, per_page: 200, more_records: true },
+    })
+    .mockResolvedValueOnce({
+      data: [attachment("sdk-200")],
+      info: { page: 2, per_page: 200, more_records: false },
+    });
+  window.ZOHO.CRM.API = { getRelatedRecords };
+
+  const result = await file.getAttachments({
+    module: "Applications_History",
+    recordId: "sandbox-history",
+    strict: true,
   });
-  const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
-  expect(result.data).toBeNull();
-  expect(result.error).toMatch(/omitted pagination details/);
+
+  expect(result.error).toBeNull();
+  expect(result.data).toHaveLength(201);
+  expect(getRelatedRecords).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ page: 2, RecordID: "sandbox-history" })
+  );
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test("strict active-environment reads accept explicit no content", async () => {
+  const getRelatedRecords = jest.fn().mockResolvedValue({
+    statusText: "No Content",
+  });
+  window.ZOHO.CRM.API = { getRelatedRecords };
+
+  await expect(file.getAttachments({
+    module: "Applications_History",
+    recordId: "sandbox-history",
+    strict: true,
+  })).resolves.toEqual({ data: [], error: null });
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test("strict active-environment errors do not fall back to another CRM connection", async () => {
+  const getRelatedRecords = jest.fn().mockResolvedValue({
+    data: [{ code: "INVALID_DATA", message: "Record is not available" }],
+  });
+  window.ZOHO.CRM.API = { getRelatedRecords };
+
+  await expect(file.getAttachments({
+    module: "Applications_History",
+    recordId: "sandbox-history",
+    strict: true,
+  })).resolves.toEqual({ data: null, error: "Record is not available" });
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test("strict active-environment request failures do not fall back to another CRM connection", async () => {
+  const getRelatedRecords = jest
+    .fn()
+    .mockRejectedValue(new Error("Active CRM attachment read failed"));
+  window.ZOHO.CRM.API = { getRelatedRecords };
+
+  await expect(file.getAttachments({
+    module: "Applications_History",
+    recordId: "sandbox-history",
+    strict: true,
+  })).resolves.toEqual({
+    data: null,
+    error: "Active CRM attachment read failed",
+  });
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test("strict reads fail closed when the active CRM API is unavailable", async () => {
+  await expect(file.getAttachments({
+    module: "Applications_History",
+    recordId: "sandbox-history",
+    strict: true,
+  })).resolves.toEqual({
+    data: null,
+    error: "The active CRM attachment API is unavailable.",
+  });
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test("non-strict display reads retain the legacy connection fallback", async () => {
+  invoke.mockResolvedValue(pageResponse([attachment("legacy")], false, 1));
+
+  await expect(file.getAttachments({
+    module: "Applications_History",
+    recordId: "history-1",
+  })).resolves.toEqual({ data: [attachment("legacy")], error: null });
   expect(invoke).toHaveBeenCalledTimes(1);
 });
 
+test("strict attachment reads reject a full page without pagination info", async () => {
+  const getRelatedRecords = jest.fn().mockResolvedValue({
+    data: Array.from({ length: 200 }, (_, index) => attachment(`a-${index}`)),
+  });
+  window.ZOHO.CRM.API = { getRelatedRecords };
+  const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
+  expect(result.data).toBeNull();
+  expect(result.error).toMatch(/omitted pagination details/);
+  expect(getRelatedRecords).toHaveBeenCalledTimes(1);
+});
+
 test("strict attachment reads reject a malformed second page without returning the first", async () => {
-  invoke.mockResolvedValueOnce(pageResponse([attachment("a-1")], true, 1));
-  invoke.mockResolvedValueOnce({ details: { statusCode: 200, statusMessage: "not JSON" } });
+  const getRelatedRecords = jest
+    .fn()
+    .mockResolvedValueOnce({
+      data: [attachment("a-1")],
+      info: { page: 1, more_records: true },
+    })
+    .mockResolvedValueOnce({ details: { statusCode: 200, statusMessage: "not JSON" } });
+  window.ZOHO.CRM.API = { getRelatedRecords };
   const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
   expect(result.data).toBeNull();
   expect(result.error).toMatch(/readable attachment list/);
 });
 
 test("strict attachment reads reject a CRM error on a later page", async () => {
-  invoke.mockResolvedValueOnce(pageResponse([attachment("a-1")], true, 1));
-  invoke.mockResolvedValueOnce({
-    details: {
-      statusCode: 403,
-      statusMessage: JSON.stringify({ code: "AUTHORIZATION_FAILED", message: "Attachment access denied" }),
-    },
-  });
+  const getRelatedRecords = jest
+    .fn()
+    .mockResolvedValueOnce({
+      data: [attachment("a-1")],
+      info: { page: 1, more_records: true },
+    })
+    .mockResolvedValueOnce({
+      code: "AUTHORIZATION_FAILED",
+      message: "Attachment access denied",
+    });
+  window.ZOHO.CRM.API = { getRelatedRecords };
   const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
   expect(result.data).toBeNull();
   expect(result.error).toBe("Attachment access denied");
 });
 
 test("strict attachment reads reject repeated records across pages", async () => {
-  invoke.mockResolvedValueOnce(pageResponse([attachment("same")], true, 1));
-  invoke.mockResolvedValueOnce(pageResponse([attachment("same")], false, 2));
+  const getRelatedRecords = jest
+    .fn()
+    .mockResolvedValueOnce({
+      data: [attachment("same")],
+      info: { page: 1, more_records: true },
+    })
+    .mockResolvedValueOnce({
+      data: [attachment("same")],
+      info: { page: 2, more_records: false },
+    });
+  window.ZOHO.CRM.API = { getRelatedRecords };
   const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
   expect(result.data).toBeNull();
   expect(result.error).toMatch(/repeated attachment IDs/);
 });
 
-test("strict attachment reads stop at the page limit", async () => {
-  invoke.mockImplementation(async (_, request) => {
-    const page = Number(new URL(request.url).searchParams.get("page"));
-    const rows = Array.from({ length: 200 }, (_, index) => attachment(`p${page}-${index}`));
-    return pageResponse(rows, true, page);
+test("strict attachment reads normalize a string pagination flag", async () => {
+  const getRelatedRecords = jest
+    .fn()
+    .mockResolvedValueOnce({
+      data: [attachment("a-1")],
+      info: { page: 1, more_records: "true" },
+    })
+    .mockResolvedValueOnce({
+      data: [attachment("a-2")],
+      info: { page: 2, more_records: "false" },
+    });
+  window.ZOHO.CRM.API = { getRelatedRecords };
+
+  const result = await file.getAttachments({
+    module: "History1",
+    recordId: "history-1",
+    strict: true,
   });
+
+  expect(result).toEqual({
+    data: [attachment("a-1"), attachment("a-2")],
+    error: null,
+  });
+  expect(getRelatedRecords).toHaveBeenCalledTimes(2);
+});
+
+test("strict attachment reads stop at the page limit", async () => {
+  const getRelatedRecords = jest.fn().mockImplementation(async ({ page }) => {
+    const rows = Array.from({ length: 200 }, (_, index) => attachment(`p${page}-${index}`));
+    return { data: rows, info: { page, more_records: true } };
+  });
+  window.ZOHO.CRM.API = { getRelatedRecords };
   const result = await file.getAttachments({ module: "History1", recordId: "history-1", strict: true });
   expect(result.data).toBeNull();
   expect(result.error).toMatch(/page limit/);
-  expect(invoke).toHaveBeenCalledTimes(100);
+  expect(getRelatedRecords).toHaveBeenCalledTimes(100);
 });
