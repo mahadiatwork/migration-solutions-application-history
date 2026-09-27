@@ -883,6 +883,7 @@ export function Dialog({
             spacing={1}
             sx={{
               "& .MuiInputLabel-root": { fontSize: "9pt" },
+              "& .MuiInputBase-root": { fontSize: "9pt" },
               "& .MuiInputBase-input": { fontSize: "9pt" },
               "& .MuiSelect-select": { fontSize: "9pt" },
             }}
