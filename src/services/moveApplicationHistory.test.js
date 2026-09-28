@@ -487,6 +487,7 @@ test("rolls back a Contact move when its junction Stakeholder is different", asy
 });
 
 const makeMatterMoveCrm = ({
+  sourceOverrides = {},
   matterOverrides = {},
   contactOverrides = {},
   initialContacts = ["contact-1"],
@@ -518,6 +519,7 @@ const makeMatterMoveCrm = ({
     Date: "2026-09-28T08:54:00+09:30",
     Billing_Type: "Billable",
     Owner: { id: "owner-1", name: "Admin" },
+    ...sourceOverrides,
   };
   const matter = {
     id: "matter-2",
@@ -689,6 +691,103 @@ describe("Application History to another Matter move", () => {
     expect(crm.api.deleteRecord).not.toHaveBeenCalledWith(expect.objectContaining({
       Entity: "Applications_History",
     }));
+  });
+
+  test("updates only destination fields while still verifying preserved History content", async () => {
+    const crm = makeMatterMoveCrm();
+    await moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    });
+
+    const movePayload = crm.api.updateRecord.mock.calls[0][0].APIData;
+    expect(movePayload).toEqual({
+      id: "application-history-1",
+      Name: "2A - Old Contact",
+      Application: { id: "matter-2" },
+      Matter_No: "2A",
+      Current_Stage: "6. Preparation",
+      Matter_Progress: ["Draft completed"],
+      Stakeholder: { id: "stakeholder-new" },
+    });
+    expect(movePayload).not.toHaveProperty("History_Details");
+    expect(movePayload).not.toHaveProperty("Date");
+    expect(movePayload).not.toHaveProperty("Owner");
+  });
+
+  test("accepts Zoho newline normalization in preserved History details", async () => {
+    const crm = makeMatterMoveCrm({
+      sourceOverrides: { History_Details: "First line\r\nSecond line" },
+      verificationOverride: { History_Details: "First line\nSecond line" },
+    });
+
+    await expect(moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    })).resolves.toMatchObject({ destination: "matter" });
+  });
+
+  test("preserves every Matter Progress value and accepts object-shaped reordered readback", async () => {
+    const crm = makeMatterMoveCrm({
+      matterOverrides: {
+        Matter_Progress: ["Ready for lodgement", "Draft completed"],
+      },
+      verificationOverride: {
+        Matter_Progress: [
+          { display_value: "Ready for lodgement" },
+          { actual_value: "Draft completed" },
+        ],
+      },
+    });
+
+    await expect(moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    })).resolves.toMatchObject({ destination: "matter" });
+    expect(crm.api.updateRecord.mock.calls[0][0].APIData.Matter_Progress)
+      .toEqual(["Draft completed", "Ready for lodgement"]);
+  });
+
+  test("rejects an extra Matter Progress value returned after the move", async () => {
+    const crm = makeMatterMoveCrm({
+      verificationOverride: {
+        Matter_Progress: ["Draft completed", "Unexpected progress"],
+      },
+    });
+
+    await expect(moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    })).rejects.toThrow("Mismatched fields: Matter Progress");
+  });
+
+  test("treats a null Matter Progress payload and empty CRM readback as equivalent", async () => {
+    const crm = makeMatterMoveCrm({
+      matterOverrides: { Matter_Progress: null },
+      verificationOverride: { Matter_Progress: [] },
+    });
+
+    await expect(moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    })).resolves.toMatchObject({ destination: "matter" });
+    expect(crm.api.updateRecord.mock.calls[0][0].APIData.Matter_Progress)
+      .toBeNull();
   });
 
   test("uses the selected Contact Stakeholder when the Matter has none", () => {
@@ -886,6 +985,20 @@ describe("Application History to another Matter move", () => {
       Stakeholder: { id: "stakeholder-old" },
     });
     expect(crm.state.links.map((link) => link.Contact.id)).toEqual(["contact-1"]);
+  });
+
+  test("identifies the field that failed destination verification", async () => {
+    const crm = makeMatterMoveCrm({
+      verificationOverride: { Matter_No: "WRONG" },
+    });
+
+    await expect(moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      delay: async () => {},
+    })).rejects.toThrow("Mismatched fields: Matter No");
   });
 
   test("restores the original Matter when the selected Contact link is rejected", async () => {

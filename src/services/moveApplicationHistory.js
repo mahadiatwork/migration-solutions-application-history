@@ -1,5 +1,4 @@
 import { zohoApi } from "../zohoApi";
-import { serializeMatterProgress } from "./applicationHistorySnapshot";
 import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
 
 const SOURCE_MODULE = "Applications_History";
@@ -393,6 +392,42 @@ const normalizeMatterValue = (value) => {
   return canonicalizeMatterPicklistValue(first);
 };
 
+const normalizeZohoText = (value, { trim = false } = {}) => {
+  const normalized = String(value ?? "").replace(/\r\n?/g, "\n");
+  return trim ? normalized.trim() : normalized;
+};
+
+const normalizeZohoValue = (value) => {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (first == null) return "";
+  if (typeof first === "object") {
+    return normalizeZohoText(
+      first.display_value ??
+        first.actual_value ??
+        first.value ??
+        first.name ??
+        "",
+      { trim: true }
+    );
+  }
+  return normalizeZohoText(first, { trim: true });
+};
+
+const normalizeMatterValues = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .map((item) => normalizeMatterValue(item))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+};
+
+const sameMatterValues = (left, right) => {
+  const normalizedLeft = normalizeMatterValues(left);
+  const normalizedRight = normalizeMatterValues(right);
+  return normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index]);
+};
+
 const destinationStakeholder = (matter, contact) =>
   [
     matter?.Stakeholder_1,
@@ -441,6 +476,7 @@ export const buildMatterMovePayload = (source, matter, contact) => {
     throw new Error("The source History and destination Matter are required.");
   }
   const stakeholder = destinationStakeholder(matter, contact);
+  const matterProgress = normalizeMatterValues(matter.Matter_Progress);
   return {
     id: String(source.id),
     ...preservedHistoryContent(source),
@@ -448,13 +484,23 @@ export const buildMatterMovePayload = (source, matter, contact) => {
     Application: { id: String(matter.id) },
     Matter_No: matter.Name ?? null,
     Current_Stage: normalizeMatterValue(matter.Current_Stage) || null,
-    Matter_Progress: serializeMatterProgress(
-      matter.Matter_Progress,
-      "multiselectpicklist"
-    ),
+    Matter_Progress: matterProgress.length ? matterProgress : null,
     Stakeholder: stakeholder ? { id: String(recordId(stakeholder)) } : null,
   };
 };
+
+// Updating an existing record already preserves its event content and attachments.
+// Only send the fields which must change for the new Matter. Re-sending textarea,
+// date and picklist values can make Zoho normalize an otherwise unchanged value.
+const matterDestinationUpdatePayload = (payload) => ({
+  id: payload.id,
+  Name: payload.Name,
+  Application: payload.Application,
+  Matter_No: payload.Matter_No,
+  Current_Stage: payload.Current_Stage,
+  Matter_Progress: payload.Matter_Progress,
+  Stakeholder: payload.Stakeholder,
+});
 
 const originalMatterPayload = (source) => ({
   id: String(source.id),
@@ -471,44 +517,97 @@ const originalMatterPayload = (source) => ({
     : null,
 });
 
-const sameMatterPayload = (record, payload) =>
-  String(recordId(record.Application) ?? "") ===
-    String(recordId(payload.Application) ?? "") &&
-  sameValue(record.Name, payload.Name) &&
-  sameValue(record.Matter_No, payload.Matter_No) &&
-  normalizeMatterValue(record.Current_Stage) ===
-    normalizeMatterValue(payload.Current_Stage) &&
-  normalizeMatterValue(record.Matter_Progress) ===
-    normalizeMatterValue(payload.Matter_Progress) &&
-  String(recordId(record.Stakeholder) ?? "") ===
-    String(recordId(payload.Stakeholder) ?? "") &&
+const matterPayloadMismatches = (record, payload) => {
+  const mismatches = [];
+  const addMismatch = (condition, label) => {
+    if (!condition) mismatches.push(label);
+  };
+
+  addMismatch(
+    String(recordId(record.Application) ?? "") ===
+      String(recordId(payload.Application) ?? ""),
+    "Matter"
+  );
+  addMismatch(
+    normalizeZohoText(record.Name, { trim: true }) ===
+      normalizeZohoText(payload.Name, { trim: true }),
+    "Name"
+  );
+  addMismatch(
+    normalizeZohoText(record.Matter_No, { trim: true }) ===
+      normalizeZohoText(payload.Matter_No, { trim: true }),
+    "Matter No"
+  );
+  addMismatch(
+    normalizeMatterValue(record.Current_Stage) ===
+      normalizeMatterValue(payload.Current_Stage),
+    "Current Stage"
+  );
+  addMismatch(
+    sameMatterValues(record.Matter_Progress, payload.Matter_Progress),
+    "Matter Progress"
+  );
+  addMismatch(
+    String(recordId(record.Stakeholder) ?? "") ===
+      String(recordId(payload.Stakeholder) ?? ""),
+    "Stakeholder"
+  );
+
+  if (Object.prototype.hasOwnProperty.call(payload, "History_Details")) {
+    addMismatch(
+      normalizeZohoText(record.History_Details) ===
+        normalizeZohoText(payload.History_Details),
+      "History Details"
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "Regarding")) {
+    addMismatch(
+      normalizeZohoText(record.Regarding) === normalizeZohoText(payload.Regarding),
+      "Regarding"
+    );
+  }
   [
-    "History_Details",
-    "History_Result",
-    "History_Type",
-    "Regarding",
-    "Duration_Min",
-    "Billing_Type",
-  ].every(
-    (field) =>
-      !Object.prototype.hasOwnProperty.call(payload, field) ||
-      sameValue(record[field], payload[field])
-  ) &&
-  (!Object.prototype.hasOwnProperty.call(payload, "Date") ||
-    sameDate(record.Date, payload.Date)) &&
-  (!payload.Owner ||
-    String(recordId(record.Owner) ?? "") === String(recordId(payload.Owner)));
+    ["History_Result", "History Result"],
+    ["History_Type", "History Type"],
+    ["Duration_Min", "Duration"],
+    ["Billing_Type", "Billing Type"],
+  ].forEach(([field, label]) => {
+    if (Object.prototype.hasOwnProperty.call(payload, field)) {
+      addMismatch(
+        normalizeZohoValue(record[field]) === normalizeZohoValue(payload[field]),
+        label
+      );
+    }
+  });
+  if (Object.prototype.hasOwnProperty.call(payload, "Date")) {
+    addMismatch(sameDate(record.Date, payload.Date), "Date");
+  }
+  if (payload.Owner) {
+    addMismatch(
+      String(recordId(record.Owner) ?? "") === String(recordId(payload.Owner)),
+      "Owner"
+    );
+  }
+
+  return mismatches;
+};
+
+const sameMatterPayload = (record, payload) =>
+  matterPayloadMismatches(record, payload).length === 0;
 
 const assertMatterDestination = (
   target,
   payload,
   destinationMatterId
 ) => {
-  if (!sameMatterPayload(target, payload)) {
-    throw new Error("The History did not retain the selected Matter details.");
-  }
   if (String(recordId(target.Application)) !== String(destinationMatterId)) {
     throw new Error("The History is not linked to the selected Matter.");
+  }
+  const mismatches = matterPayloadMismatches(target, payload);
+  if (mismatches.length) {
+    throw new Error(
+      `The History did not retain the selected Matter details. Mismatched fields: ${mismatches.join(", ")}.`
+    );
   }
 };
 
@@ -804,7 +903,7 @@ export async function moveApplicationHistoryToMatter({
     await updateApplicationHistory(
       api,
       sourceId,
-      payload,
+      matterDestinationUpdatePayload(payload),
       "Move History to Matter"
     );
     updateSucceeded = true;

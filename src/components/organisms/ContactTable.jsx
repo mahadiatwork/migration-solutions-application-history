@@ -515,9 +515,6 @@ export const ContactDialog = ({
               <CircularProgress size={48} />
             </Box>
           )}
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            This move uses the last saved History entry. Unsaved changes in the edit form will be lost. Save them first, then reopen the entry to move it.
-          </Alert>
           <Box
             display="flex"
             gap={2}

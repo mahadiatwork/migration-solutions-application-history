@@ -104,9 +104,6 @@ export default function StakeholderMoveDialog({
       <Dialog open={open} onClose={isMoving ? undefined : onClose} fullWidth maxWidth="sm">
         <DialogTitle sx={{ fontSize: "12pt" }}>Move History to Stakeholder</DialogTitle>
         <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            This move uses the last saved History entry. Unsaved changes in the edit form will be lost. Save them first, then reopen the entry to move it.
-          </Alert>
           <Box display="flex" gap={1} mt={1}>
             <TextField
               label="Search Stakeholders"
