@@ -49,11 +49,19 @@ const makeCrm = ({
       if (Entity === "Applications_History" && ambiguousSourceDelete && state.parentDeletionAttempted) {
         throw new Error("Source read unavailable");
       }
-      return { data: [Entity === "Applications_History"
-        ? source
-        : Entity === "Application_Hstory"
-          ? { id: RecordID }
-          : { id: "main-history-1", ...state.payload, Matter: targetMatter, ...targetOverride }] };
+      if (Entity === "Applications_History") return { data: [source] };
+      if (Entity === "Application_Hstory") return { data: [{ id: RecordID }] };
+      const target = {
+        id: "main-history-1",
+        ...state.payload,
+        Matter: targetMatter,
+        ...targetOverride,
+      };
+      // History1 does not return unused fields that are absent from its layout.
+      if (!Object.prototype.hasOwnProperty.call(targetOverride, "Billing_Type")) {
+        delete target.Billing_Type;
+      }
+      return { data: [target] };
     }),
     getRelatedRecords: jest.fn(async ({ Entity }) => ({
       data: Entity === "Applications_History"
@@ -167,17 +175,51 @@ test("moves directly to Stakeholder History without requiring a Contact", async 
   expect(crm.ZOHO.CRM.FUNCTIONS.execute).not.toHaveBeenCalled();
 });
 
-test("uses the widget's Billable default for a legacy record without Billing Type", async () => {
-  const crm = makeCrm({ contacts: [], sourceBillingType: null });
-  await moveApplicationHistoryToMain({
+test.each([
+  [null, "Billable"],
+  ["Non-Billable", "Non-Billable"],
+])(
+  "preserves Billing Type in the create payload when CRM omits it from readback (%s)",
+  async (sourceBillingType, expectedBillingType) => {
+    const crm = makeCrm({ contacts: [], sourceBillingType });
+    await moveApplicationHistoryToMain({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destination: "stakeholder",
+      destinationId: "stakeholder-2",
+      listAttachments: crm.listAttachments,
+    });
+    expect(crm.state.payload.Billing_Type).toBe(expectedBillingType);
+    expect(crm.state.deleted).toBe(true);
+  }
+);
+
+test("accepts a matching Billing Type when CRM returns the field", async () => {
+  const crm = makeCrm({ targetOverride: { Billing_Type: "Non-Billable" } });
+  await expect(moveApplicationHistoryToMain({
     ZOHO: crm.ZOHO,
     sourceId: "application-history-1",
-    destination: "stakeholder",
-    destinationId: "stakeholder-2",
+    destination: "contact",
+    destinationId: "contact-2",
     listAttachments: crm.listAttachments,
-  });
-  expect(crm.state.payload.Billing_Type).toBe("Billable");
+  })).resolves.toMatchObject({ targetId: "main-history-1" });
+  expect(crm.state.deleted).toBe(true);
 });
+
+test.each([null, "", "-None-", "Write-Off"])(
+  "rolls back if CRM explicitly returns a different Billing Type (%s)",
+  async (targetBillingType) => {
+    const crm = makeCrm({ targetOverride: { Billing_Type: targetBillingType } });
+    await expect(moveApplicationHistoryToMain({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destination: "contact",
+      destinationId: "contact-2",
+      listAttachments: crm.listAttachments,
+    })).rejects.toMatchObject({ rolledBack: true, sourceDeleted: false });
+    expect(crm.state.deleted).toBe(false);
+  }
+);
 
 test("retains participant links when moving to another Stakeholder", async () => {
   const crm = makeCrm({ contacts: ["contact-1", "contact-2"] });

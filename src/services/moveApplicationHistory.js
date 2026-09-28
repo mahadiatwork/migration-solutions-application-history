@@ -174,7 +174,13 @@ const assertTarget = (target, payload, destination, destinationId) => {
   if (!sameDate(payload.Date, target.Date)) {
     throw new Error("The new History record has a different Date.");
   }
-  if (payload.Billing_Type !== (target.Billing_Type ?? null)) {
+  // Billing_Type is inactive on some History layouts, so Zoho can omit it from
+  // readback even after accepting it in the create payload. Validate it whenever
+  // the API exposes the field, while preserving the value for compatible layouts.
+  if (
+    Object.prototype.hasOwnProperty.call(target, "Billing_Type") &&
+    payload.Billing_Type !== (target.Billing_Type ?? null)
+  ) {
     throw new Error("The new History record has a different Billing Type.");
   }
 };
