@@ -892,7 +892,7 @@ export function Dialog({
               "& .MuiSelect-select": { fontSize: "9pt" },
             }}
           >
-            <Grid item xs={24} sm={4}>
+            <Grid item xs={24} sm={2}>
               <TextField
                 fullWidth
                 variant="standard"
@@ -901,7 +901,7 @@ export function Dialog({
                 InputProps={{ readOnly: true }}
               />
             </Grid>
-            <Grid item xs={24} sm={7}>
+            <Grid item xs={24} sm={8}>
               <FormControl
                 fullWidth
                 variant="standard"
@@ -920,7 +920,7 @@ export function Dialog({
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={24} sm={7}>
+            <Grid item xs={24} sm={8}>
               <FormControl
                 fullWidth
                 variant="standard"
