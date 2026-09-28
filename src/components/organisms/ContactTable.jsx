@@ -1,5 +1,9 @@
-import React, { useState, useEffect } from "react";
-import { moveApplicationHistoryToMain } from "../../services/moveApplicationHistory";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  fetchContactMatters,
+  moveApplicationHistoryToMain,
+  moveApplicationHistoryToMatter,
+} from "../../services/moveApplicationHistory";
 import {
   Table,
   TableBody,
@@ -12,6 +16,7 @@ import {
   Dialog as MUIDialog,
   DialogContent,
   DialogActions,
+  DialogTitle,
   Snackbar,
   Alert,
   Box,
@@ -73,7 +78,7 @@ const ContactTable = ({
               >
                 <TableCell padding="checkbox">
                   <Radio
-                    checked={selectedContactId === contact.id}
+                    checked={String(selectedContactId) === String(contact.id)}
                     onChange={() => handleRowSelect(contact.id)}
                     sx={{ padding: "4px" }}
                   />
@@ -116,12 +121,90 @@ const getContactName = (contact) =>
   `${contact?.First_Name || ""} ${contact?.Last_Name || ""}`.trim() ||
   "";
 
+const displayValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(displayValue).filter(Boolean).join(", ");
+  }
+  if (value && typeof value === "object") {
+    return value.display_value || value.actual_value || value.name || value.Account_Name || "";
+  }
+  return value == null ? "" : String(value);
+};
+
+const matterStakeholder = (matter) =>
+  matter?.Stakeholder_Auto || matter?.Stakeholder_1 || matter?.Stake_Holder || null;
+
+const MatterTable = ({
+  matters,
+  selectedMatterId,
+  setSelectedMatterId,
+  sourceMatterId,
+}) => (
+  <TableContainer sx={{ maxHeight: 260, mt: 1, border: "1px solid #e0e0e0" }}>
+    <Table size="small" sx={{ fontSize: "9pt" }}>
+      <TableHead>
+        <TableRow sx={{ backgroundColor: "#f5f5f5" }}>
+          <TableCell width="40px" />
+          <TableCell sx={{ fontWeight: "bold", fontSize: "9pt" }}>Matter No</TableCell>
+          <TableCell sx={{ fontWeight: "bold", fontSize: "9pt" }}>Current Stage</TableCell>
+          <TableCell sx={{ fontWeight: "bold", fontSize: "9pt" }}>Matter Progress</TableCell>
+          <TableCell sx={{ fontWeight: "bold", fontSize: "9pt" }}>Stakeholder</TableCell>
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {matters.map((matter) => {
+          const matterId = String(matter.id);
+          const isCurrentMatter = sourceMatterId != null &&
+            matterId === String(sourceMatterId);
+          const matterNumber = displayValue(matter.Name) || matterId;
+          return (
+            <TableRow
+              key={matterId}
+              hover={!isCurrentMatter}
+              onClick={() => {
+                if (!isCurrentMatter) setSelectedMatterId(matterId);
+              }}
+              sx={{
+                cursor: isCurrentMatter ? "default" : "pointer",
+                opacity: isCurrentMatter ? 0.55 : 1,
+              }}
+            >
+              <TableCell padding="checkbox">
+                <Radio
+                  checked={String(selectedMatterId) === matterId}
+                  onChange={() => setSelectedMatterId(matterId)}
+                  disabled={isCurrentMatter}
+                  inputProps={{ "aria-label": `Select Matter ${matterNumber}` }}
+                  sx={{ padding: "4px" }}
+                />
+              </TableCell>
+              <TableCell sx={{ fontSize: "9pt" }}>
+                {matterNumber}{isCurrentMatter ? " (Current Matter)" : ""}
+              </TableCell>
+              <TableCell sx={{ fontSize: "9pt" }}>
+                {displayValue(matter.Current_Stage) || "-"}
+              </TableCell>
+              <TableCell sx={{ fontSize: "9pt" }}>
+                {displayValue(matter.Matter_Progress) || "-"}
+              </TableCell>
+              <TableCell sx={{ fontSize: "9pt" }}>
+                {displayValue(matterStakeholder(matter)) || "-"}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  </TableContainer>
+);
+
 export const ContactDialog = ({
   openContactDialog,
   handleContactDialogClose,
   contacts = [],
   ZOHO,
   selectedRowData,
+  sourceMatterId,
   onRecordMoved,
 }) => {
   const [selectedContactId, setSelectedContactId] = useState(null);
@@ -129,7 +212,14 @@ export const ContactDialog = ({
   const [searchType, setSearchType] = useState("First_Name");
   const [searchText, setSearchText] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [isMoving, setIsMoving] = useState(false);
+  const [matters, setMatters] = useState([]);
+  const [selectedMatterId, setSelectedMatterId] = useState(null);
+  const [mattersLoaded, setMattersLoaded] = useState(false);
+  const [isLoadingMatters, setIsLoadingMatters] = useState(false);
+  const matterRequestRef = useRef(0);
+  const searchRequestRef = useRef(0);
+  const [movingDestination, setMovingDestination] = useState(null);
+  const isMoving = movingDestination !== null;
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
@@ -141,23 +231,74 @@ export const ContactDialog = ({
   }, [contacts]);
 
   useEffect(() => {
+    matterRequestRef.current += 1;
+    searchRequestRef.current += 1;
     if (openContactDialog) {
       setSelectedContactId(null);
+      setDisplayContacts(contacts);
       setSearchText("");
       setIsSearching(false);
+      setMatters([]);
+      setSelectedMatterId(null);
+      setMattersLoaded(false);
+      setIsLoadingMatters(false);
+    } else {
+      setIsSearching(false);
+      setIsLoadingMatters(false);
     }
-  }, [openContactDialog]);
+  }, [contacts, openContactDialog]);
+
+  useEffect(() => {
+    if (
+      sourceMatterId != null &&
+      selectedMatterId != null &&
+      String(sourceMatterId) === String(selectedMatterId)
+    ) {
+      setSelectedMatterId(null);
+    }
+  }, [selectedMatterId, sourceMatterId]);
+
+  const closeContactDialog = () => {
+    matterRequestRef.current += 1;
+    searchRequestRef.current += 1;
+    setIsSearching(false);
+    setIsLoadingMatters(false);
+    handleContactDialogClose();
+  };
+
+  const handleContactChange = (contactId) => {
+    if (String(contactId) !== String(selectedContactId)) {
+      matterRequestRef.current += 1;
+      setMatters([]);
+      setSelectedMatterId(null);
+      setMattersLoaded(false);
+      setIsLoadingMatters(false);
+    }
+    setSelectedContactId(contactId);
+  };
 
   const handleCloseSnackbar = () => {
     setSnackbar({ open: false, message: "", severity: "success" });
   };
 
   const handleSearch = async () => {
+    if (isSearching) return;
+    matterRequestRef.current += 1;
+    setSelectedContactId(null);
+    setMatters([]);
+    setSelectedMatterId(null);
+    setMattersLoaded(false);
+    setIsLoadingMatters(false);
+    setDisplayContacts([]);
+
     if (!ZOHO || !searchText.trim()) {
+      searchRequestRef.current += 1;
       setDisplayContacts(contacts);
       return;
     }
 
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
     setIsSearching(true);
     try {
       let searchResults = await ZOHO.CRM.API.searchRecord({
@@ -169,6 +310,7 @@ export const ContactDialog = ({
             : `(${searchType}:equals:${searchText.trim()})`,
       });
 
+      if (searchRequestRef.current !== requestId) return;
       if (searchResults.data && searchResults.data.length > 0) {
         const formattedContacts = searchResults.data.map((c) => ({
           id: c.id,
@@ -178,18 +320,12 @@ export const ContactDialog = ({
           Mobile: c.Mobile || "N/A",
           Full_Name: `${c.First_Name || ""} ${c.Last_Name || ""}`.trim() || c.Full_Name || "Unknown",
           ID_Number: c.ID_Number || "N/A",
+          Account_Name: c.Account_Name || null,
         }));
 
-        // Merge with existing contacts avoiding duplicates
-        const combinedMap = new Map();
-        formattedContacts.forEach((item) => combinedMap.set(item.id, item));
-        contacts.forEach((item) => {
-          if (!combinedMap.has(item.id)) {
-            combinedMap.set(item.id, item);
-          }
-        });
-        setDisplayContacts(Array.from(combinedMap.values()));
+        setDisplayContacts(formattedContacts);
       } else {
+        setDisplayContacts([]);
         setSnackbar({
           open: true,
           message: "No matching contacts found in CRM.",
@@ -197,14 +333,58 @@ export const ContactDialog = ({
         });
       }
     } catch (error) {
+      if (searchRequestRef.current !== requestId) return;
       console.error("Error searching contacts:", error);
+      setDisplayContacts([]);
       setSnackbar({
         open: true,
         message: "Failed to search contacts.",
         severity: "error",
       });
     } finally {
-      setIsSearching(false);
+      if (searchRequestRef.current === requestId) setIsSearching(false);
+    }
+  };
+
+  const handleLoadMatters = async () => {
+    if (!selectedContactId) return;
+    const requestId = matterRequestRef.current + 1;
+    matterRequestRef.current = requestId;
+    setIsLoadingMatters(true);
+    setSelectedMatterId(null);
+    try {
+      const relatedMatters = await fetchContactMatters({
+        ZOHO,
+        contactId: selectedContactId,
+      });
+      if (!Array.isArray(relatedMatters)) {
+        throw new Error("CRM did not return the Contact's Matters.");
+      }
+      if (matterRequestRef.current !== requestId) return;
+      setMatters(relatedMatters);
+      setMattersLoaded(true);
+      const selectableMatters = relatedMatters.filter(
+        (matter) => sourceMatterId == null || String(matter?.id) !== String(sourceMatterId)
+      );
+      if (!selectableMatters.length) {
+        setSnackbar({
+          open: true,
+          message: "This Contact has no other Matters. You can still move the History to Contact History.",
+          severity: "info",
+        });
+      }
+    } catch (error) {
+      if (matterRequestRef.current !== requestId) return;
+      console.error("Error loading Contact Matters:", error);
+      setMatters([]);
+      setMattersLoaded(false);
+      setSnackbar({
+        open: true,
+        message: error.message || "Failed to load the Contact's Matters.",
+        severity: "error",
+      });
+    } finally {
+      if (matterRequestRef.current === requestId) setIsLoadingMatters(false);
     }
   };
 
@@ -226,7 +406,7 @@ export const ContactDialog = ({
       return;
     }
 
-    setIsMoving(true);
+    setMovingDestination("contact");
     try {
       await moveApplicationHistoryToMain({
         ZOHO,
@@ -237,12 +417,12 @@ export const ContactDialog = ({
       });
       if (onRecordMoved) onRecordMoved(selectedRowData.id);
       setSnackbar({ open: true, message: "History moved to Contact successfully.", severity: "success" });
-      handleContactDialogClose();
+      closeContactDialog();
     } catch (error) {
       console.error("Error moving History to Contact:", error);
       if (error.sourceDeleted) {
         if (onRecordMoved) onRecordMoved(selectedRowData.id);
-        handleContactDialogClose();
+        closeContactDialog();
       }
       setSnackbar({
         open: true,
@@ -250,23 +430,72 @@ export const ContactDialog = ({
         severity: error.sourceDeleted ? "warning" : "error",
       });
     } finally {
-      setIsMoving(false);
+      setMovingDestination(null);
+    }
+  };
+
+  const handleMatterSelect = async () => {
+    if (!selectedContactId || !selectedMatterId || !selectedRowData?.id) {
+      setSnackbar({
+        open: true,
+        message: "Select a Contact and one of their Matters.",
+        severity: "error",
+      });
+      return;
+    }
+    if (sourceMatterId != null && String(selectedMatterId) === String(sourceMatterId)) {
+      setSnackbar({
+        open: true,
+        message: "Select a different Matter from the current Matter.",
+        severity: "warning",
+      });
+      return;
+    }
+
+    setMovingDestination("matter");
+    try {
+      await moveApplicationHistoryToMatter({
+        ZOHO,
+        sourceId: selectedRowData.id,
+        destinationMatterId: selectedMatterId,
+        destinationContactId: selectedContactId,
+      });
+      if (onRecordMoved) onRecordMoved(selectedRowData.id);
+      setSnackbar({
+        open: true,
+        message: "History moved to the selected Matter successfully.",
+        severity: "success",
+      });
+      closeContactDialog();
+    } catch (error) {
+      console.error("Error moving History to Matter:", error);
+      setSnackbar({
+        open: true,
+        message: error.message || "History could not be moved to the selected Matter.",
+        severity: "error",
+      });
+    } finally {
+      setMovingDestination(null);
     }
   };
   return (
     <>
       <MUIDialog
         open={openContactDialog}
-        onClose={isMoving ? undefined : handleContactDialogClose}
+        onClose={isMoving ? undefined : closeContactDialog}
+        fullWidth
+        maxWidth="lg"
         PaperProps={{
           sx: {
-            minWidth: "600px",
-            maxWidth: "800px",
+            width: { xs: "calc(100% - 32px)", sm: "calc(100% - 64px)" },
+            maxWidth: "1000px",
+            margin: { xs: "16px", sm: "32px" },
             padding: "16px",
             fontSize: "9pt",
           },
         }}
       >
+        <DialogTitle sx={{ fontSize: "12pt" }}>Move History</DialogTitle>
         <DialogContent sx={{ position: "relative" }}>
           {isMoving && (
             <Box
@@ -289,14 +518,20 @@ export const ContactDialog = ({
           <Alert severity="warning" sx={{ mb: 2 }}>
             This move uses the last saved History entry. Unsaved changes in the edit form will be lost. Save them first, then reopen the entry to move it.
           </Alert>
-          <Box display="flex" gap={2} mb={2}>
+          <Box
+            display="flex"
+            gap={2}
+            mb={2}
+            flexDirection={{ xs: "column", sm: "row" }}
+          >
             <TextField
               select
               label="Search By"
               value={searchType}
               onChange={(e) => setSearchType(e.target.value)}
+              disabled={isSearching}
               size="small"
-              sx={{ width: "150px", ...commonStyles }}
+              sx={{ width: { xs: "100%", sm: "150px" }, ...commonStyles }}
             >
               <MenuItem value="First_Name">First Name</MenuItem>
               <MenuItem value="Last_Name">Last Name</MenuItem>
@@ -309,8 +544,9 @@ export const ContactDialog = ({
               label="Search Contact"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
+              disabled={isSearching}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleSearch();
+                if (e.key === "Enter" && !isSearching) handleSearch();
               }}
               fullWidth
               size="small"
@@ -320,7 +556,7 @@ export const ContactDialog = ({
               variant="contained"
               onClick={handleSearch}
               disabled={isSearching}
-              sx={{ width: "120px", ...commonStyles }}
+              sx={{ width: { xs: "100%", sm: "120px" }, ...commonStyles }}
             >
               {isSearching ? "Searching..." : "Search"}
             </Button>
@@ -333,22 +569,74 @@ export const ContactDialog = ({
           <ContactTable
             contacts={displayContacts}
             selectedContactId={selectedContactId}
-            setSelectedContactId={setSelectedContactId}
+            setSelectedContactId={handleContactChange}
           />
+          <Box display="flex" justifyContent="flex-end" mt={1}>
+            <Button
+              variant="outlined"
+              onClick={handleLoadMatters}
+              disabled={
+                !selectedContactId ||
+                !sourceMatterId ||
+                isLoadingMatters ||
+                isSearching ||
+                isMoving
+              }
+              sx={commonStyles}
+            >
+              {isLoadingMatters ? "Loading Matters..." : "View Contact Matters"}
+            </Button>
+          </Box>
+
+          {mattersLoaded && (
+            <Box mt={2}>
+              <Typography variant="subtitle2" sx={{ fontWeight: "bold", fontSize: "9pt" }}>
+                Select Target Matter:
+              </Typography>
+              {matters.length > 0 ? (
+                <MatterTable
+                  matters={matters}
+                  selectedMatterId={selectedMatterId}
+                  setSelectedMatterId={setSelectedMatterId}
+                  sourceMatterId={sourceMatterId}
+                />
+              ) : (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  This Contact has no Matters. You can still move the History to Contact History.
+                </Alert>
+              )}
+            </Box>
+          )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleContactDialogClose} color="secondary" disabled={isMoving} sx={commonStyles}>
+        <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}>
+          <Button onClick={closeContactDialog} color="secondary" disabled={isMoving} sx={commonStyles}>
             Cancel
           </Button>
           <Button
             onClick={handleContactSelect}
-            color="primary"
-            variant="contained"
-            disabled={!selectedContactId || isMoving}
+            color="success"
+            variant="outlined"
+            disabled={!selectedContactId || isSearching || isMoving}
             sx={{ ...commonStyles, display: "flex", alignItems: "center", gap: 1 }}
           >
-            {isMoving && <CircularProgress size={16} color="inherit" />}
-            {isMoving ? "Moving..." : "Move"}
+            {movingDestination === "contact" && <CircularProgress size={16} color="inherit" />}
+            {movingDestination === "contact" ? "Moving..." : "Move to Contact History"}
+          </Button>
+          <Button
+            onClick={handleMatterSelect}
+            color="primary"
+            variant="contained"
+            disabled={
+              !selectedContactId ||
+              !selectedMatterId ||
+              !sourceMatterId ||
+              isSearching ||
+              isMoving
+            }
+            sx={{ ...commonStyles, display: "flex", alignItems: "center", gap: 1 }}
+          >
+            {movingDestination === "matter" && <CircularProgress size={16} color="inherit" />}
+            {movingDestination === "matter" ? "Moving..." : "Move to Selected Matter"}
           </Button>
         </DialogActions>
       </MUIDialog>

@@ -1,9 +1,14 @@
 import { zohoApi } from "../zohoApi";
+import { serializeMatterProgress } from "./applicationHistorySnapshot";
+import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
 
 const SOURCE_MODULE = "Applications_History";
 const TARGET_MODULE = "History1";
 const SOURCE_CONTACT_LIST = "Contacts4";
 const TARGET_CONTACT_LIST = "Contacts3";
+const MATTERS_MODULE = "Applications";
+const MATTER_CONTACT_LIST = "Applications";
+const APPLICATION_HISTORY_CONTACT_MODULE = "Application_Hstory";
 const PAGE_SIZE = 200;
 const ATTACHMENT_CHECK_DELAYS_MS = [0, 250, 750, 1500];
 
@@ -51,11 +56,14 @@ const readRelated = async (api, entity, id, relatedList) => {
 
 const sourceContactId = (link) => recordId(link.Contact) || recordId(link.Contact_Details);
 
+const targetContactId = (link) =>
+  recordId(link.Contact_Details) || recordId(link.Contact);
+
 const contactCounts = (links) => {
   const counts = new Map();
   links.forEach((link) => {
     if (!sourceContactId(link)) {
-      throw new Error("CRM returned a Contact link without its Contact ID during source restoration.");
+      throw new Error("CRM returned a Contact link without its Contact ID.");
     }
     const id = String(sourceContactId(link));
     counts.set(id, (counts.get(id) || 0) + 1);
@@ -250,6 +258,7 @@ export async function moveApplicationHistoryToMain({
         APIData: {
           Contact_History_Info: { id: targetId },
           Contact_Details: { id: contactId },
+          Stakeholder: payload.Stakeholder,
         },
         Trigger: ["workflow"],
       }), `Link Contact ${contactId}`);
@@ -261,10 +270,24 @@ export async function moveApplicationHistoryToMain({
       newLinkIds.push(linkId);
     }
     const targetLinks = await readRelated(api, TARGET_MODULE, targetId, TARGET_CONTACT_LIST);
-    const verifiedIds = new Set(targetLinks.map((link) => recordId(link.Contact_Details)).filter(Boolean).map(String));
+    const verifiedIds = new Set(targetLinks.map(targetContactId).filter(Boolean).map(String));
     if (targetLinks.length !== contactIds.size || verifiedIds.size !== contactIds.size ||
       [...contactIds].some((id) => !verifiedIds.has(id))) {
       throw new Error("The new History record has different Contact links than expected.");
+    }
+    const expectedStakeholderId = recordId(payload.Stakeholder);
+    for (const link of targetLinks) {
+      const verifiedLink =
+        expectedStakeholderId &&
+        !Object.prototype.hasOwnProperty.call(link, "Stakeholder")
+          ? await readRecord(api, "History_X_Contacts", recordId(link))
+          : link;
+      if (
+        String(recordId(verifiedLink.Stakeholder) ?? "") !==
+        String(expectedStakeholderId ?? "")
+      ) {
+        throw new Error("The new History Contact links have a different Stakeholder.");
+      }
     }
 
     if (sourceAttachments.length > 0) {
@@ -352,5 +375,539 @@ export async function moveApplicationHistoryToMain({
         : "";
     throw new HistoryMoveError(`${error.message || "Move failed."}${ids}${rollbackStatus}`,
       sourceId, targetId, sourceDeleted, rolledBack);
+  }
+}
+
+const normalizeMatterValue = (value) => {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (first == null) return "";
+  if (typeof first === "object") {
+    return canonicalizeMatterPicklistValue(
+      first.display_value ??
+        first.actual_value ??
+        first.value ??
+        first.name ??
+        ""
+    );
+  }
+  return canonicalizeMatterPicklistValue(first);
+};
+
+const destinationStakeholder = (matter, contact) =>
+  [
+    matter?.Stakeholder_1,
+    matter?.Stakeholder_Auto,
+    matter?.Stake_Holder,
+    matter?.Stakeholder,
+    contact?.Account_Name,
+  ].find((candidate) => recordId(candidate)) || null;
+
+const preservedHistoryContent = (source) => {
+  const payload = {};
+  [
+    "History_Details",
+    "History_Result",
+    "History_Type",
+    "Regarding",
+    "Duration_Min",
+    "Date",
+    "Billing_Type",
+  ].forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(source || {}, field)) {
+      payload[field] = source[field] ?? null;
+    }
+  });
+  if (recordId(source?.Owner)) {
+    payload.Owner = { id: String(recordId(source.Owner)) };
+  }
+  return payload;
+};
+
+const updatedHistoryName = (source, matter) => {
+  const existingName = String(source?.Name || "").trim();
+  const oldMatterNo = String(
+    source?.Matter_No || source?.Application?.name || ""
+  ).trim();
+  const newMatterNo = String(matter?.Name || "").trim();
+  if (!newMatterNo) return existingName || "History";
+  if (oldMatterNo && existingName.startsWith(`${oldMatterNo} - `)) {
+    return `${newMatterNo}${existingName.slice(oldMatterNo.length)}`;
+  }
+  return existingName || newMatterNo;
+};
+
+export const buildMatterMovePayload = (source, matter, contact) => {
+  if (!source?.id || !matter?.id) {
+    throw new Error("The source History and destination Matter are required.");
+  }
+  const stakeholder = destinationStakeholder(matter, contact);
+  return {
+    id: String(source.id),
+    ...preservedHistoryContent(source),
+    Name: updatedHistoryName(source, matter),
+    Application: { id: String(matter.id) },
+    Matter_No: matter.Name ?? null,
+    Current_Stage: normalizeMatterValue(matter.Current_Stage) || null,
+    Matter_Progress: serializeMatterProgress(
+      matter.Matter_Progress,
+      "multiselectpicklist"
+    ),
+    Stakeholder: stakeholder ? { id: String(recordId(stakeholder)) } : null,
+  };
+};
+
+const originalMatterPayload = (source) => ({
+  id: String(source.id),
+  ...preservedHistoryContent(source),
+  Name: source.Name ?? null,
+  Application: recordId(source.Application)
+    ? { id: String(recordId(source.Application)) }
+    : null,
+  Matter_No: source.Matter_No ?? null,
+  Current_Stage: source.Current_Stage ?? null,
+  Matter_Progress: source.Matter_Progress ?? null,
+  Stakeholder: recordId(source.Stakeholder)
+    ? { id: String(recordId(source.Stakeholder)) }
+    : null,
+});
+
+const sameMatterPayload = (record, payload) =>
+  String(recordId(record.Application) ?? "") ===
+    String(recordId(payload.Application) ?? "") &&
+  sameValue(record.Name, payload.Name) &&
+  sameValue(record.Matter_No, payload.Matter_No) &&
+  normalizeMatterValue(record.Current_Stage) ===
+    normalizeMatterValue(payload.Current_Stage) &&
+  normalizeMatterValue(record.Matter_Progress) ===
+    normalizeMatterValue(payload.Matter_Progress) &&
+  String(recordId(record.Stakeholder) ?? "") ===
+    String(recordId(payload.Stakeholder) ?? "") &&
+  [
+    "History_Details",
+    "History_Result",
+    "History_Type",
+    "Regarding",
+    "Duration_Min",
+    "Billing_Type",
+  ].every(
+    (field) =>
+      !Object.prototype.hasOwnProperty.call(payload, field) ||
+      sameValue(record[field], payload[field])
+  ) &&
+  (!Object.prototype.hasOwnProperty.call(payload, "Date") ||
+    sameDate(record.Date, payload.Date)) &&
+  (!payload.Owner ||
+    String(recordId(record.Owner) ?? "") === String(recordId(payload.Owner)));
+
+const assertMatterDestination = (
+  target,
+  payload,
+  destinationMatterId
+) => {
+  if (!sameMatterPayload(target, payload)) {
+    throw new Error("The History did not retain the selected Matter details.");
+  }
+  if (String(recordId(target.Application)) !== String(destinationMatterId)) {
+    throw new Error("The History is not linked to the selected Matter.");
+  }
+};
+
+const verifyMatterDestinationWithRetry = async (
+  api,
+  sourceId,
+  payload,
+  destinationMatterId,
+  delay
+) => {
+  let lastError;
+  for (const delayMs of ATTACHMENT_CHECK_DELAYS_MS) {
+    if (delayMs) await delay(delayMs);
+    try {
+      const target = await readRecord(api, SOURCE_MODULE, sourceId);
+      assertMatterDestination(target, payload, destinationMatterId);
+      return target;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
+const contactLinkIds = (links) =>
+  new Set(links.map((link) => targetContactId(link)).filter(Boolean).map(String));
+
+const sameContactCounts = (left, right) =>
+  left.size === right.size &&
+  [...left].every(([contactId, count]) => right.get(contactId) === count);
+
+const containsContactCounts = (actual, expected) =>
+  [...expected].every(
+    ([contactId, count]) => (actual.get(contactId) || 0) >= count
+  );
+
+const verifyApplicationHistoryContactLinksWithRetry = async (
+  api,
+  sourceId,
+  expectedCounts,
+  delay
+) => {
+  let lastError;
+  for (const delayMs of ATTACHMENT_CHECK_DELAYS_MS) {
+    if (delayMs) await delay(delayMs);
+    try {
+      const links = await readRelated(
+        api,
+        SOURCE_MODULE,
+        sourceId,
+        SOURCE_CONTACT_LIST
+      );
+      if (links.some((link) => !recordId(link) || !targetContactId(link))) {
+        throw new Error("CRM returned an incomplete History Contact link.");
+      }
+      if (!sameContactCounts(contactCounts(links), expectedCounts)) {
+        throw new Error("The History did not retain the expected Contact links.");
+      }
+      return links;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
+const readLinksBeforeDestinationInsert = async (
+  api,
+  sourceId,
+  destinationContactId,
+  delay
+) => {
+  let links = [];
+  for (const delayMs of ATTACHMENT_CHECK_DELAYS_MS) {
+    if (delayMs) await delay(delayMs);
+    links = await readRelated(
+      api,
+      SOURCE_MODULE,
+      sourceId,
+      SOURCE_CONTACT_LIST
+    );
+    if (links.some((link) => !recordId(link) || !targetContactId(link))) {
+      throw new Error("CRM returned an incomplete History Contact link.");
+    }
+    if (contactLinkIds(links).has(String(destinationContactId))) return links;
+  }
+  return links;
+};
+
+const restoreApplicationHistoryContactLinks = async (
+  api,
+  sourceId,
+  originalLinks
+) => {
+  const expectedCounts = contactCounts(originalLinks);
+  const originalByRecordId = new Map(
+    originalLinks.map((link) => [
+      String(recordId(link)),
+      String(targetContactId(link)),
+    ])
+  );
+  const currentLinks = await readRelated(
+    api,
+    SOURCE_MODULE,
+    sourceId,
+    SOURCE_CONTACT_LIST
+  );
+
+  for (const link of currentLinks) {
+    const linkId = recordId(link);
+    const contactId = targetContactId(link);
+    if (!linkId || !contactId) {
+      throw new Error("CRM returned an incomplete History Contact link during rollback.");
+    }
+    if (
+      originalByRecordId.has(String(linkId)) &&
+      originalByRecordId.get(String(linkId)) !== String(contactId)
+    ) {
+      successItem(await api.deleteRecord({
+        Entity: APPLICATION_HISTORY_CONTACT_MODULE,
+        RecordID: String(linkId),
+      }), `Remove changed Contact link ${linkId}`);
+    }
+  }
+
+  const retainedCounts = contactCounts(await readRelated(
+    api,
+    SOURCE_MODULE,
+    sourceId,
+    SOURCE_CONTACT_LIST
+  ));
+  for (const [contactId, expectedCount] of expectedCounts) {
+    for (
+      let missing = expectedCount - (retainedCounts.get(contactId) || 0);
+      missing > 0;
+      missing -= 1
+    ) {
+      successItem(await api.insertRecord({
+        Entity: APPLICATION_HISTORY_CONTACT_MODULE,
+        APIData: {
+          Application_Hstory: { id: String(sourceId) },
+          Contact: { id: String(contactId) },
+        },
+        Trigger: ["workflow"],
+      }), `Restore Contact ${contactId}`);
+    }
+  }
+
+  const restored = await readRelated(
+    api,
+    SOURCE_MODULE,
+    sourceId,
+    SOURCE_CONTACT_LIST
+  );
+  if (restored.some((link) => !recordId(link) || !targetContactId(link))) {
+    throw new Error("CRM returned an incomplete restored History Contact link.");
+  }
+  const restoredCounts = contactCounts(restored);
+  if (!containsContactCounts(restoredCounts, expectedCounts)) {
+    throw new Error("Could not restore the original History Contact links.");
+  }
+  if (!sameContactCounts(restoredCounts, expectedCounts)) {
+    throw new Error(
+      "Unexpected History Contact links remain; none were removed automatically."
+    );
+  }
+};
+
+const updateApplicationHistory = async (api, sourceId, payload, action) =>
+  successItem(await api.updateRecord({
+    Entity: SOURCE_MODULE,
+    RecordID: sourceId,
+    APIData: payload,
+    Trigger: ["workflow"],
+  }), action);
+
+/** Load every Matter shown in the selected Contact's Applications related list. */
+export async function fetchContactMatters({
+  ZOHO,
+  contactId,
+  excludeMatterId = null,
+}) {
+  if (!ZOHO?.CRM?.API || !contactId) {
+    throw new Error("Select a valid Contact before loading Matters.");
+  }
+  const matters = [];
+  const seen = new Set();
+  const fields = [
+    "id",
+    "Name",
+    "Type_of_Application",
+    "Current_Stage",
+    "Matter_Progress",
+    "Stakeholder_1",
+    "Stakeholder_Auto",
+    "Stake_Holder",
+    "Contact_Name",
+    "Modified_Time",
+  ].join(",");
+
+  for (let page = 1; page <= 100; page += 1) {
+    const response = await ZOHO.CRM.API.getRelatedRecords({
+      Entity: "Contacts",
+      RecordID: contactId,
+      RelatedList: MATTER_CONTACT_LIST,
+      page,
+      per_page: PAGE_SIZE,
+      fields,
+    });
+    if (response?.statusText?.toLowerCase() === "nocontent") break;
+    if (!Array.isArray(response?.data)) {
+      throw new Error("CRM did not return the selected Contact's Matters.");
+    }
+    for (const matter of response.data) {
+      const id = recordId(matter);
+      if (!id || seen.has(String(id))) continue;
+      seen.add(String(id));
+      if (excludeMatterId && String(id) === String(excludeMatterId)) continue;
+      matters.push(matter);
+    }
+    const moreRecords = response?.info?.more_records === true;
+    if (
+      response?.info?.more_records === false ||
+      (!moreRecords && response.data.length < PAGE_SIZE)
+    ) break;
+    if (page === 100) {
+      throw new Error("This Contact has too many Matters to display safely.");
+    }
+  }
+
+  return matters.sort((left, right) =>
+    String(left?.Name || "").localeCompare(String(right?.Name || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+}
+
+/**
+ * Reassign an Applications_History record to another Matter in place.
+ * Keeping the record ID preserves its attachments while the update and any new
+ * Contact link are verified and rolled back together on failure.
+ */
+export async function moveApplicationHistoryToMatter({
+  ZOHO,
+  sourceId,
+  destinationMatterId,
+  destinationContactId,
+  delay = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
+  if (!ZOHO?.CRM?.API || !sourceId || !destinationMatterId || !destinationContactId) {
+    throw new Error("Select a valid Contact and Matter destination.");
+  }
+
+  const api = ZOHO.CRM.API;
+  const source = await readRecord(api, SOURCE_MODULE, sourceId);
+  const sourceMatterId = recordId(source.Application);
+  if (!sourceMatterId) {
+    throw new Error("The source History is not linked to a Matter.");
+  }
+  if (String(sourceMatterId) === String(destinationMatterId)) {
+    throw new Error("Select a different Matter from the current one.");
+  }
+
+  const matter = await readRecord(api, MATTERS_MODULE, destinationMatterId);
+  if (String(recordId(matter.Contact_Name) ?? "") !== String(destinationContactId)) {
+    throw new Error("The selected Matter is no longer associated with this Contact.");
+  }
+  const contact = await readRecord(api, "Contacts", destinationContactId);
+  const payload = buildMatterMovePayload(source, matter, contact);
+  const rollbackPayload = originalMatterPayload(source);
+  const originalLinks = await readRelated(
+    api,
+    SOURCE_MODULE,
+    sourceId,
+    SOURCE_CONTACT_LIST
+  );
+  if (originalLinks.some((link) => !recordId(link) || !targetContactId(link))) {
+    throw new Error("CRM returned an incomplete History Contact link.");
+  }
+  const expectedContactCounts = contactCounts(originalLinks);
+  if (!expectedContactCounts.has(String(destinationContactId))) {
+    expectedContactCounts.set(String(destinationContactId), 1);
+  }
+
+  let updateAttempted = false;
+  let updateSucceeded = false;
+  let linkInsertSucceeded = false;
+  let createdLinkId = null;
+  try {
+    updateAttempted = true;
+    await updateApplicationHistory(
+      api,
+      sourceId,
+      payload,
+      "Move History to Matter"
+    );
+    updateSucceeded = true;
+    await verifyMatterDestinationWithRetry(
+      api,
+      sourceId,
+      payload,
+      destinationMatterId,
+      delay
+    );
+
+    const linksAfterUpdate = await readLinksBeforeDestinationInsert(
+      api,
+      sourceId,
+      destinationContactId,
+      delay
+    );
+    if (!contactLinkIds(linksAfterUpdate).has(String(destinationContactId))) {
+      const inserted = successItem(await api.insertRecord({
+        Entity: APPLICATION_HISTORY_CONTACT_MODULE,
+        APIData: {
+          Application_Hstory: { id: String(sourceId) },
+          Contact: { id: String(destinationContactId) },
+        },
+        Trigger: ["workflow"],
+      }), `Link Contact ${destinationContactId}`);
+      linkInsertSucceeded = true;
+      createdLinkId = recordId(inserted.details);
+    }
+
+    await verifyApplicationHistoryContactLinksWithRetry(
+      api,
+      sourceId,
+      expectedContactCounts,
+      delay
+    );
+    await verifyMatterDestinationWithRetry(
+      api,
+      sourceId,
+      payload,
+      destinationMatterId,
+      delay
+    );
+
+    return {
+      sourceId: String(sourceId),
+      targetId: String(sourceId),
+      destination: "matter",
+      matterId: String(destinationMatterId),
+      contactId: String(destinationContactId),
+    };
+  } catch (error) {
+    const rollbackErrors = [];
+    const rollbackLinkIds = new Set(createdLinkId ? [String(createdLinkId)] : []);
+    if (linkInsertSucceeded && !createdLinkId) {
+      rollbackErrors.push(
+        "CRM did not return the new Contact link ID, so no ambiguous link was removed automatically"
+      );
+    }
+    for (const linkId of rollbackLinkIds) {
+      try {
+        successItem(await api.deleteRecord({
+          Entity: APPLICATION_HISTORY_CONTACT_MODULE,
+          RecordID: linkId,
+        }), "Remove destination Contact link");
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError.message);
+      }
+    }
+    if (updateAttempted) {
+      try {
+        const current = await readRecord(api, SOURCE_MODULE, sourceId);
+        if (updateSucceeded || !sameMatterPayload(current, rollbackPayload)) {
+          await updateApplicationHistory(
+            api,
+            sourceId,
+            rollbackPayload,
+            "Restore original Matter"
+          );
+          await verifyMatterDestinationWithRetry(
+            api,
+            sourceId,
+            rollbackPayload,
+            sourceMatterId,
+            delay
+          );
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError.message);
+      }
+      try {
+        await restoreApplicationHistoryContactLinks(
+          api,
+          sourceId,
+          originalLinks
+        );
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError.message);
+      }
+    }
+    const suffix = rollbackErrors.length
+      ? ` Rollback needs attention: ${rollbackErrors.join("; ")}.`
+      : " The History remains on its original Matter.";
+    throw new Error(`${error.message || "Matter move failed."}${suffix}`);
   }
 }

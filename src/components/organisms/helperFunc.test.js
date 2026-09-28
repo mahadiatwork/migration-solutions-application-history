@@ -21,6 +21,16 @@ describe("resolveModuleStakeholder", () => {
     ).toEqual({ id: "account-2", name: "Legacy Account" });
   });
 
+  test("uses the Matter's automatic Stakeholder when the primary lookup is empty", () => {
+    expect(
+      resolveModuleStakeholder({
+        Stakeholder_1: null,
+        Stakeholder_Auto: { id: "account-auto", name: "Automatic Account" },
+        Stake_Holder: { id: "account-old", name: "Deprecated Account" },
+      })
+    ).toEqual({ id: "account-auto", name: "Automatic Account" });
+  });
+
   test("returns null when no usable lookup is present", () => {
     expect(resolveModuleStakeholder({ Stake_Holder: null })).toBeNull();
   });

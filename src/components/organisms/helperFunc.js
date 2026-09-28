@@ -86,6 +86,7 @@ export const getResultOptions = (type, config, existingValue) => {
 export const resolveModuleStakeholder = (moduleData) => {
   const stakeholder = [
     moduleData?.Stakeholder_1,
+    moduleData?.Stakeholder_Auto,
     moduleData?.Stake_Holder,
     moduleData?.Stakeholder,
   ].find((candidate) => candidate?.id);

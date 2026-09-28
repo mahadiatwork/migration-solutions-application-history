@@ -1472,6 +1472,13 @@ export function Dialog({
         contacts={contacts}
         ZOHO={ZOHO}
         selectedRowData={selectedRowData}
+        sourceMatterId={
+          sourceMatterId ||
+          (isMatterContext ? currentModuleData?.id : null) ||
+          selectedRowData?.Application?.id ||
+          selectedRowData?.historyDetails?.Application?.id ||
+          null
+        }
         onRecordMoved={(movedId) => {
           if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
         }}
