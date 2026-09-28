@@ -16,7 +16,7 @@ describe("Application History Matter summary", () => {
   test("new history defaults from its Matter with Billable billing", () => {
     expect(matterSummaryFromSource(matter)).toEqual({
       matterNo: "MAT-1001",
-      currentStage: "2. Strategy & Eligibility",
+      currentStage: "2. Consultation/Strategy & Eligibility",
       matterProgress: "Consultation confirmed",
       billingType: "Billable",
     });
@@ -52,7 +52,7 @@ describe("Application History Matter summary", () => {
       billingType: "Billable",
     });
     expect(matterSummaryForEdit(matter, {}).currentStage).toBe(
-      "2. Strategy & Eligibility"
+      "2. Consultation/Strategy & Eligibility"
     );
   });
 
@@ -60,7 +60,7 @@ describe("Application History Matter summary", () => {
     const formData = matterSummaryFromSource(matter);
     expect(buildApplicationHistorySummary(formData, "multiselectpicklist")).toEqual({
       Matter_No: "MAT-1001",
-      Current_Stage: "2. Strategy & Eligibility",
+      Current_Stage: "2. Consultation/Strategy & Eligibility",
       Matter_Progress: ["Consultation confirmed"],
       Billing_Type: "Billable",
     });
@@ -71,6 +71,30 @@ describe("Application History Matter summary", () => {
     expect(inferMatterProgressFieldType({ Matter_Progress: "Review" }, matter))
       .toBe("picklist");
     expect(matter.Matter_Progress).toEqual(["Consultation confirmed"]);
+  });
+
+  test("normalizes source metadata aliases before saving the History snapshot", () => {
+    const summary = matterSummaryFromSource({
+      Name: "MAT-1002",
+      Current_Stage: {
+        actual_value: "4. Preparation",
+        display_value: "6. Preparation",
+      },
+      Matter_Progress: [{
+        actual_value: "Internal QA review",
+        display_value: "Pre-submission review",
+      }],
+    });
+
+    expect(summary).toMatchObject({
+      currentStage: "6. Preparation",
+      matterProgress: "Pre-submission review",
+    });
+    expect(buildApplicationHistorySummary(summary, "multiselectpicklist"))
+      .toMatchObject({
+        Current_Stage: "6. Preparation",
+        Matter_Progress: ["Pre-submission review"],
+      });
   });
 
   test("a sparse list refresh preserves saved values and explicit clears", () => {

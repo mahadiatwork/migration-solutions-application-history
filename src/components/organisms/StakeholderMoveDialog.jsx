@@ -4,12 +4,10 @@ import {
   Box,
   Button,
   CircularProgress,
-  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
   List,
   ListItemButton,
   ListItemText,
@@ -32,7 +30,6 @@ export default function StakeholderMoveDialog({
   const [selected, setSelected] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
-  const [acknowledgedSavedVersion, setAcknowledgedSavedVersion] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const suggestedId = suggestedStakeholder?.id;
   const suggestedName = suggestedStakeholder?.name;
@@ -41,7 +38,6 @@ export default function StakeholderMoveDialog({
     if (!open) return;
     setQuery("");
     setSelected(null);
-    setAcknowledgedSavedVersion(false);
     setResults(suggestedId ? [{ id: suggestedId, name: suggestedName || "" }] : []);
   }, [open, suggestedId, suggestedName]);
 
@@ -74,7 +70,7 @@ export default function StakeholderMoveDialog({
   };
 
   const move = async () => {
-    if (!selected?.id || !selectedRowData?.id || !acknowledgedSavedVersion) return;
+    if (!selected?.id || !selectedRowData?.id) return;
     setIsMoving(true);
     try {
       await moveApplicationHistoryToMain({
@@ -138,20 +134,10 @@ export default function StakeholderMoveDialog({
               </ListItemButton>
             ))}
           </List>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={acknowledgedSavedVersion}
-                onChange={(event) => setAcknowledgedSavedVersion(event.target.checked)}
-                disabled={isMoving}
-              />
-            }
-            label="I understand that unsaved changes will not move."
-          />
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={isMoving}>Cancel</Button>
-          <Button onClick={move} disabled={!selected?.id || !acknowledgedSavedVersion || isMoving} variant="contained">
+          <Button onClick={move} disabled={!selected?.id || isMoving} variant="contained">
             {isMoving ? "Moving..." : "Move"}
           </Button>
         </DialogActions>

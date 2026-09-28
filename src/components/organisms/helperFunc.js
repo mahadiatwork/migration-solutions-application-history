@@ -151,6 +151,3 @@ export const getRegardingOptions = (type, existingValue, config) => {
 
   return predefinedOptions;
 };
-
-export const shouldOfferManualOther = (config, configuredOptions = []) =>
-  config?._source !== "custom_module" || configuredOptions.includes("Other");

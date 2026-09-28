@@ -19,8 +19,6 @@ import {
   MenuItem,
   Typography,
   CircularProgress,
-  Checkbox,
-  FormControlLabel,
 } from "@mui/material";
 
 const commonStyles = {
@@ -132,7 +130,6 @@ export const ContactDialog = ({
   const [searchText, setSearchText] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
-  const [acknowledgedSavedVersion, setAcknowledgedSavedVersion] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
@@ -148,7 +145,6 @@ export const ContactDialog = ({
       setSelectedContactId(null);
       setSearchText("");
       setIsSearching(false);
-      setAcknowledgedSavedVersion(false);
     }
   }, [openContactDialog]);
 
@@ -213,7 +209,6 @@ export const ContactDialog = ({
   };
 
   const handleContactSelect = async () => {
-    if (!acknowledgedSavedVersion) return;
     if (!selectedContactId || !selectedRowData?.id) {
       setSnackbar({
         open: true,
@@ -340,17 +335,6 @@ export const ContactDialog = ({
             selectedContactId={selectedContactId}
             setSelectedContactId={setSelectedContactId}
           />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={acknowledgedSavedVersion}
-                onChange={(event) => setAcknowledgedSavedVersion(event.target.checked)}
-                disabled={isMoving}
-              />
-            }
-            label="I understand that unsaved changes will not move."
-            sx={{ mt: 1 }}
-          />
         </DialogContent>
         <DialogActions>
           <Button onClick={handleContactDialogClose} color="secondary" disabled={isMoving} sx={commonStyles}>
@@ -360,7 +344,7 @@ export const ContactDialog = ({
             onClick={handleContactSelect}
             color="primary"
             variant="contained"
-            disabled={!selectedContactId || !acknowledgedSavedVersion || isMoving}
+            disabled={!selectedContactId || isMoving}
             sx={{ ...commonStyles, display: "flex", alignItems: "center", gap: 1 }}
           >
             {isMoving && <CircularProgress size={16} color="inherit" />}

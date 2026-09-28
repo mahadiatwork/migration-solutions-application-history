@@ -65,4 +65,117 @@ describe("RegardingField", () => {
     expect(screen.getByRole("option", { name: "Meeting agenda" })).not.toBeNull();
     expect(screen.queryByRole("option", { name: "2nd Followup" })).toBeNull();
   });
+
+  test("always offers Custom and saves only the typed text", () => {
+    const Harness = () => {
+      const [formData, setFormData] = React.useState({
+        type: "Communication & Meetings",
+        result: "Call",
+        regarding: "",
+      });
+      const handleInputChange = (field, value) => {
+        setFormData((current) => ({ ...current, [field]: value }));
+      };
+      return (
+        <>
+          <RegardingField
+            formData={formData}
+            handleInputChange={handleInputChange}
+            selectedRowData={null}
+            picklistConfig={picklistConfig}
+          />
+          <span data-testid="saved-regarding">{formData.regarding}</span>
+        </>
+      );
+    };
+
+    render(<Harness />);
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Custom" }));
+
+    const customInput = screen.getByLabelText("Custom Regarding");
+    fireEvent.change(customInput, { target: { value: "Client requested a callback" } });
+    expect(screen.getByTestId("saved-regarding").textContent).toBe(
+      "Client requested a callback"
+    );
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Follow up" }));
+    expect(screen.queryByLabelText("Custom Regarding")).toBeNull();
+    expect(screen.getByTestId("saved-regarding").textContent).toBe("Follow up");
+  });
+
+  test("reopens a saved nonconfigured Regarding value in the Custom text box", () => {
+    render(
+      <RegardingField
+        formData={{
+          type: "Communication & Meetings",
+          result: "Call",
+          regarding: "Client-specific note",
+        }}
+        handleInputChange={jest.fn()}
+        selectedRowData={{ id: "history-1", regarding: "Client-specific note" }}
+        picklistConfig={picklistConfig}
+      />
+    );
+
+    expect(screen.getByLabelText("Custom Regarding").value).toBe(
+      "Client-specific note"
+    );
+  });
+
+  test("keeps a configured Regarding value as a normal selection", () => {
+    render(
+      <RegardingField
+        formData={{
+          type: "Communication & Meetings",
+          result: "Call",
+          regarding: "Follow up",
+        }}
+        handleInputChange={jest.fn()}
+        selectedRowData={{ id: "history-1", regarding: "Follow up" }}
+        picklistConfig={picklistConfig}
+      />
+    );
+
+    expect(screen.queryByLabelText("Custom Regarding")).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getByRole("option", { name: "Custom" })).not.toBeNull();
+  });
+
+  test("leaves Custom mode when refreshed configuration contains the saved value", () => {
+    const props = {
+      formData: {
+        type: "Communication & Meetings",
+        result: "Call",
+        regarding: "CRM supplied option",
+      },
+      handleInputChange: jest.fn(),
+      selectedRowData: { id: "history-1", regarding: "CRM supplied option" },
+    };
+    const { rerender } = render(
+      <RegardingField {...props} picklistConfig={picklistConfig} />
+    );
+    expect(screen.getByLabelText("Custom Regarding").value).toBe(
+      "CRM supplied option"
+    );
+
+    rerender(
+      <RegardingField
+        {...props}
+        picklistConfig={{
+          ...picklistConfig,
+          regarding: {
+            ...picklistConfig.regarding,
+            Call: ["2nd Followup", "Follow up", "CRM supplied option"],
+          },
+        }}
+      />
+    );
+
+    expect(screen.queryByLabelText("Custom Regarding")).toBeNull();
+    expect(screen.getByRole("combobox").textContent).toContain(
+      "CRM supplied option"
+    );
+  });
 });

@@ -420,6 +420,10 @@ export function Dialog({
     matterMetadata,
     formData.currentStage
   );
+  const mappedProgressOptions = getProgressOptions(
+    matterMetadata,
+    formData.currentStage
+  );
   const currentProgressOptions = getProgressOptions(
     matterMetadata,
     formData.currentStage,
@@ -898,7 +902,11 @@ export function Dialog({
               />
             </Grid>
             <Grid item xs={24} sm={7}>
-              <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
+              <FormControl
+                fullWidth
+                variant="standard"
+                disabled={isMatterLoading}
+              >
                 <InputLabel>Current Stage</InputLabel>
                 <Select
                   value={formData.currentStage || ""}
@@ -913,7 +921,11 @@ export function Dialog({
               </FormControl>
             </Grid>
             <Grid item xs={24} sm={7}>
-              <FormControl fullWidth variant="standard" disabled={isMatterLoading}>
+              <FormControl
+                fullWidth
+                variant="standard"
+                disabled={isMatterLoading || !formData.currentStage}
+              >
                 <InputLabel>Matter Progress</InputLabel>
                 <Select
                   value={formData.matterProgress || ""}
@@ -927,7 +939,7 @@ export function Dialog({
                     <MenuItem key={progress} value={progress} sx={{ fontSize: "9pt" }}>{progress}</MenuItem>
                   ))}
                 </Select>
-                {!isMatterLoading && formData.currentStage && currentProgressOptions.length === 0 && (
+                {!isMatterLoading && formData.currentStage && mappedProgressOptions.length === 0 && (
                   <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
                     {matterMetadata.dependencyError
                       ? matterMetadata.dependencyError.startsWith("OAUTH_SCOPE_MISMATCH")

@@ -6,6 +6,7 @@ import {
   MATTERS_MODULE,
   MATTER_SOURCE_FIELDS,
 } from "../config/config";
+import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
 
 const ZOHO = window.ZOHO;
 
@@ -15,26 +16,133 @@ export const normalizePicklistValue = (value) => {
     return value.map(normalizePicklistValue).filter(Boolean).join(", ");
   }
   if (typeof value === "object") {
-    return String(
-      value.actual_value ??
-        value.display_value ??
+    return canonicalizeMatterPicklistValue(
+      value.display_value ??
+        value.actual_value ??
         value.name ??
         value.value ??
         ""
-    ).trim();
+    );
   }
-  return String(value).trim();
+  return canonicalizeMatterPicklistValue(value);
 };
 
 const uniqueValues = (values = []) => {
   const seen = new Set();
   return values.reduce((result, value) => {
     const normalized = normalizePicklistValue(value);
-    if (!normalized || seen.has(normalized)) return result;
+    if (!normalized || normalized === "-None-" || seen.has(normalized)) return result;
     seen.add(normalized);
     result.push(normalized);
     return result;
   }, []);
+};
+
+// Customer-approved fallback for the Current Stage -> Matter Progress dependency.
+// Live Zoho layout/dependency metadata remains authoritative when it is available.
+export const FALLBACK_MATTER_PROGRESS_BY_STAGE = {
+  "1. Enquiry": [
+    "Enquiry received (phone, email or website)",
+    "Initial information requested",
+    "Initial information forwarded to Advisor for triage",
+    "Awaiting client response",
+    "Awaiting Advisor response",
+    "Enquiry assessed and qualified by Advisor",
+    "Client invited for consultation",
+    "Not suitable for service",
+  ],
+  "2. Consultation/Strategy & Eligibility": [
+    "Consultation scheduled",
+    "Consultation confirmed",
+    "Consultation completed",
+    "Eligibility assessment in progress",
+    "Eligibility assessment and strategy submitted for internal sign-off",
+    "Eligibility assessment and strategy approved",
+    "Quote preparation in progress",
+    "Quote issued",
+    "Assessment complete",
+    "Assessment complete - Quote issued",
+    "Assessment complete - No suitable pathway",
+    "Assessment complete - No engagement",
+  ],
+  "3. Engagement & Agreement": [
+    "Quote accepted",
+    "Service agreement drafting in progress",
+    "Service agreement under internal review",
+    "Service agreement sent",
+    "Awaiting signed agreement",
+    "Invoice raised",
+    "Awaiting payment",
+    "Payment received",
+  ],
+  "4. File Allocation": [
+    "File ready for allocation",
+    "Assigned to advisor",
+    "Awaiting work commencement",
+  ],
+  "5. Document Collection": [
+    "Preparing document checklist",
+    "Document checklist sent",
+    "Awaiting documents from client",
+    "Documents partially received",
+    "Documents under review",
+    "Further documents requested",
+  ],
+  "6. Preparation": [
+    "Application/Submission drafting in progress",
+    "Draft completed",
+    "Pre-submission review",
+    "Review feedback received, updates in progress",
+    "Ready for lodgement",
+  ],
+  "7. Lodgement & Processing": [
+    "Lodged",
+    "Awaiting outcome",
+    "Awaiting hearing",
+    "RFI received",
+    "RFI response in progress",
+    "Awaiting additional information from client",
+    "RFI response submitted",
+    "Hearing called",
+    "Hearing attended",
+    "Awaiting Citizenship test/appointment",
+    "Scheduled for Citizenship test/appointment",
+  ],
+  "8. Decision": [
+    "Invited",
+    "Not Invited",
+    "Approved",
+    "Refused",
+    "Withdrawn",
+    "Affirmed",
+    "Remitted",
+    "Further action required",
+    "Awaiting Citizenship ceremony",
+  ],
+};
+
+export const getFallbackProgressOptions = (stage, availableProgress = []) => {
+  const configured = FALLBACK_MATTER_PROGRESS_BY_STAGE[
+    normalizePicklistValue(stage)
+  ];
+  if (!configured) return null;
+
+  const available = new Set(uniqueValues(availableProgress));
+  if (available.size === 0) return [...configured];
+  return configured.filter((option) => available.has(option));
+};
+
+export const hasValidatedFallbackSignature = (metadata) => {
+  const expectedStages = Object.keys(FALLBACK_MATTER_PROGRESS_BY_STAGE);
+  const expectedProgress = Object.values(FALLBACK_MATTER_PROGRESS_BY_STAGE).flat();
+  const stages = uniqueValues(metadata?.stages || []);
+  const progress = uniqueValues(metadata?.progress || []);
+  return (
+    stages.length === expectedStages.length &&
+    progress.length === expectedProgress.length &&
+    expectedStages.every((stage) => stages.includes(stage)) &&
+    expectedProgress.every((option) => progress.includes(option))
+  );
 };
 
 export const isAvailablePicklistValue = (option) => {
@@ -133,7 +241,11 @@ const getLayoutStageValues = (layout) => {
 const hasCompleteLayoutDependencyMap = (response, matter) => {
   const layout = selectLayout(extractLayouts(response), matter);
   if (!layout) return false;
-  const stages = getLayoutStageValues(layout).filter(isAvailablePicklistValue);
+  const stages = getLayoutStageValues(layout).filter(
+    (stage) =>
+      isAvailablePicklistValue(stage) &&
+      normalizePicklistValue(stage) !== "-None-"
+  );
   return (
     stages.length > 0 &&
     stages.every((stage) => Array.isArray(stage?.maps)) &&
@@ -146,13 +258,13 @@ const hasCompleteLayoutDependencyMap = (response, matter) => {
   );
 };
 
-const dependencyMapFromValues = (pickListValues = []) => {
+const dependencyMapFromValues = (pickListValues = [], preserveEmpty = false) => {
   const progressByStage = {};
   pickListValues
     .filter(isAvailablePicklistValue)
     .forEach((stageOption) => {
       const stage = normalizePicklistValue(stageOption);
-      if (!stage || !Array.isArray(stageOption?.maps)) return;
+      if (!stage || stage === "-None-" || !Array.isArray(stageOption?.maps)) return;
       progressByStage[stage] = uniqueValues(
         stageOption.maps
           .filter(isAvailablePicklistValue)
@@ -161,10 +273,11 @@ const dependencyMapFromValues = (pickListValues = []) => {
     });
 
   // An all-empty layout map is not proof that every progress value is forbidden.
-  // The v8 map_dependency response remains authoritative in that case.
-  return Object.values(progressByStage).some((options) => options.length > 0)
-    ? progressByStage
-    : {};
+  // A direct v8 map_dependency response is authoritative, including empty maps.
+  const hasMappedValues = Object.values(progressByStage).some(
+    (options) => options.length > 0
+  );
+  return preserveEmpty || hasMappedValues ? progressByStage : {};
 };
 
 export const extractMatterLayoutMetadata = (response, matter = null) => {
@@ -214,7 +327,7 @@ export const extractMatterDependencyMetadata = (response) => {
   );
   if (!dependency) return { stages: [], progress: [], progressByStage: {} };
   const pickListValues = dependency.pick_list_values || [];
-  const progressByStage = dependencyMapFromValues(pickListValues);
+  const progressByStage = dependencyMapFromValues(pickListValues, true);
   return {
     stages: uniqueValues(
       pickListValues.filter(isAvailablePicklistValue).map(normalizePicklistValue)
@@ -255,17 +368,20 @@ export const getProgressOptions = (metadata, stage, currentValue) => {
     progressByStage,
     normalizedStage
   );
-  // Keep a stored historical value visible on edit. Use stage-specific values
-  // when Zoho supplied dependency rules. If those rules are unavailable (or no
-  // dependency is configured), keep the field usable with the layout's full
-  // Matter Progress picklist instead of presenting an empty dropdown.
+  const fallbackOptions =
+    metadata?.dependencyError && hasValidatedFallbackSignature(metadata)
+      ? getFallbackProgressOptions(normalizedStage, metadata?.progress || [])
+      : null;
+  // Keep a stored historical value visible on edit. Live Zoho rules take
+  // precedence; the approved fallback applies only when those rules cannot be
+  // read. Blank or unknown stages fail closed instead of showing every value.
   const baseOptions = normalizedStage
     ? hasMappedStage
       ? progressByStage[normalizedStage]
       : hasDependencyRules
         ? []
-        : metadata?.progress || []
-    : metadata?.progress || [];
+        : fallbackOptions || []
+    : [];
   return withCurrentPicklistValue(baseOptions, currentValue);
 };
 
@@ -350,7 +466,10 @@ const fetchMappedDependency = async (layoutId) => {
     isMatterProgressDependency
   );
   if (!summary) return summaryResponse;
-  if (Array.isArray(summary.pick_list_values)) return summaryResponse;
+  if (
+    Array.isArray(summary.pick_list_values) &&
+    summary.pick_list_values.length > 0
+  ) return summaryResponse;
   if (!summary.id) return summaryResponse;
   return invokeSettingsGet(
     `${baseUrl}/${encodeURIComponent(summary.id)}?${moduleQuery}`
@@ -368,16 +487,21 @@ export const fetchMatterPicklistMetadata = async (matter = null) => {
       progressByStage: {},
     };
     let dependencyError = null;
+    let dependencyLookupAttempted = false;
     // Skip the scope-gated request only when every available stage explicitly
     // supplies maps and at least one stage maps to a progress value.
     if (
       layoutMetadata.layoutId &&
       !hasCompleteLayoutDependencyMap(layoutsResponse, matter)
     ) {
+      dependencyLookupAttempted = true;
       try {
         const dependencyResponse = await fetchMappedDependency(
           layoutMetadata.layoutId
         );
+        if (!dependencyResponse) {
+          throw new Error("Matter Progress dependency rules are unavailable.");
+        }
         dependencyMetadata = extractMatterDependencyMetadata(
           dependencyResponse
         );
@@ -386,8 +510,17 @@ export const fetchMatterPicklistMetadata = async (matter = null) => {
         dependencyError = error?.message || "Matter Progress rules could not be loaded.";
       }
     }
+    const mergedMetadata = mergeMatterMetadata(
+      layoutMetadata,
+      dependencyMetadata
+    );
     return {
-      ...mergeMatterMetadata(layoutMetadata, dependencyMetadata),
+      ...mergedMetadata,
+      progressByStage: dependencyLookupAttempted
+        ? dependencyError
+          ? {}
+          : dependencyMetadata.progressByStage
+        : mergedMetadata.progressByStage,
       dependencyError,
     };
   } catch (error) {

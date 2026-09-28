@@ -1,11 +1,15 @@
 import {
   extractMatterDependencyMetadata,
   extractMatterLayoutMetadata,
+  FALLBACK_MATTER_PROGRESS_BY_STAGE,
+  getFallbackProgressOptions,
   getApplicationHistoryProgressFieldType,
   getInvokeError,
   getProgressOptions,
   getStageOptions,
+  hasValidatedFallbackSignature,
   mergeMatterMetadata,
+  normalizePicklistValue,
 } from "./matterMetadata";
 
 const layoutResponse = {
@@ -58,6 +62,51 @@ describe("Application History Matter metadata", () => {
     });
   });
 
+  test("uses CRM display values and canonicalizes legacy source values", () => {
+    const response = {
+      layouts: [{
+        id: "layout-1",
+        fields: [
+          {
+            api_name: "Current_Stage",
+            pick_list_values: [
+              { actual_value: "-None-", display_value: "-None-", type: "used", maps: [] },
+              {
+                actual_value: "4. Preparation",
+                display_value: "6. Preparation",
+                type: "used",
+                maps: [{
+                  actual_value: "Internal QA review",
+                  display_value: "Pre-submission review",
+                  type: "used",
+                }],
+              },
+            ],
+          },
+          {
+            api_name: "Matter_Progress",
+            pick_list_values: [{
+              actual_value: "Internal QA review",
+              display_value: "Pre-submission review",
+              type: "used",
+            }],
+          },
+        ],
+      }],
+    };
+
+    const metadata = extractMatterLayoutMetadata(response);
+    expect(metadata.stages).toEqual(["6. Preparation"]);
+    expect(metadata.progress).toEqual(["Pre-submission review"]);
+    expect(metadata.progressByStage).toEqual({
+      "6. Preparation": ["Pre-submission review"],
+    });
+    expect(normalizePicklistValue("7. Decision")).toBe("8. Decision");
+    expect(getProgressOptions(metadata, "6. Preparation")).toEqual([
+      "Pre-submission review",
+    ]);
+  });
+
   test("does not interpret empty layout maps as a restrictive dependency", () => {
     const response = JSON.parse(JSON.stringify(layoutResponse));
     response.layouts[0].sections[0].fields[0].pick_list_values[0].maps = [];
@@ -98,6 +147,23 @@ describe("Application History Matter metadata", () => {
     expect(getProgressOptions(metadata, "Unknown stage")).toEqual([]);
   });
 
+  test("keeps authoritative empty dependency maps restrictive", () => {
+    const metadata = extractMatterDependencyMetadata({
+      map_dependency: [{
+        active: true,
+        parent: { api_name: "Current_Stage" },
+        child: { api_name: "Matter_Progress" },
+        pick_list_values: [
+          { actual_value: "Open", maps: [] },
+          { actual_value: "Closed", maps: [] },
+        ],
+      }],
+    });
+
+    expect(metadata.progressByStage).toEqual({ Open: [], Closed: [] });
+    expect(getProgressOptions(metadata, "Open")).toEqual([]);
+  });
+
   test("keeps stored historical values visible during edit", () => {
     const metadata = extractMatterLayoutMetadata(layoutResponse);
     expect(getStageOptions(metadata, "Historic stage")).toEqual([
@@ -109,24 +175,56 @@ describe("Application History Matter metadata", () => {
       "Historic progress",
     ]);
     expect(getProgressOptions(metadata, "", "Historic progress")).toEqual([
-      "Collecting",
-      "Lodged",
       "Historic progress",
     ]);
   });
 
-  test("uses all progress values when dependency rules are unavailable", () => {
+  test("uses the approved stage mapping when dependency rules are unavailable", () => {
+    const allProgress = Object.values(FALLBACK_MATTER_PROGRESS_BY_STAGE).flat();
     const metadata = {
-      stages: ["Open", "Closed"],
-      progress: ["Collecting", "Lodged"],
+      stages: Object.keys(FALLBACK_MATTER_PROGRESS_BY_STAGE),
+      progress: allProgress,
       progressByStage: {},
       dependencyError: "OAUTH_SCOPE_MISMATCH: invalid oauth scope",
     };
 
-    expect(getProgressOptions(metadata, "Open")).toEqual([
-      "Collecting",
-      "Lodged",
+    expect(getProgressOptions(metadata, "4. File Allocation")).toEqual([
+      "File ready for allocation",
+      "Assigned to advisor",
+      "Awaiting work commencement",
     ]);
+    expect(getProgressOptions(metadata, "Open")).toEqual([]);
+    expect(getProgressOptions(metadata, "")).toEqual([]);
+    expect(hasValidatedFallbackSignature(metadata)).toBe(true);
+    expect(hasValidatedFallbackSignature({
+      ...metadata,
+      progress: metadata.progress.slice(1),
+    })).toBe(false);
+  });
+
+  test("live dependency rules override the validated fallback", () => {
+    const metadata = {
+      stages: Object.keys(FALLBACK_MATTER_PROGRESS_BY_STAGE),
+      progress: Object.values(FALLBACK_MATTER_PROGRESS_BY_STAGE).flat(),
+      progressByStage: { "4. File Allocation": ["Live configured value"] },
+      dependencyError: "A stale fetch error that should not override live rules",
+    };
+
+    expect(getProgressOptions(metadata, "4. File Allocation")).toEqual([
+      "Live configured value",
+    ]);
+  });
+
+  test("fallback covers all active Matter Progress values and legacy stage names", () => {
+    const allProgress = Object.values(FALLBACK_MATTER_PROGRESS_BY_STAGE).flat();
+    expect(allProgress).toHaveLength(62);
+    expect(new Set(allProgress)).toHaveProperty("size", 62);
+    expect(getFallbackProgressOptions("1. Intake & Engagement"))
+      .toEqual(FALLBACK_MATTER_PROGRESS_BY_STAGE["1. Enquiry"]);
+    expect(getFallbackProgressOptions("6. Post-Lodgement / Processing"))
+      .toEqual(FALLBACK_MATTER_PROGRESS_BY_STAGE["7. Lodgement & Processing"]);
+    expect(getFallbackProgressOptions("7. Decision"))
+      .toEqual(FALLBACK_MATTER_PROGRESS_BY_STAGE["8. Decision"]);
   });
 
   test("surfaces connection scope errors", () => {
@@ -218,6 +316,55 @@ describe("Application History Matter metadata", () => {
     }
   });
 
+  test("fetches dependency detail when the summary omits mapped values", async () => {
+    const previousZoho = window.ZOHO;
+    const response = JSON.parse(JSON.stringify(layoutResponse));
+    delete response.layouts[0].sections[0].fields[0].pick_list_values[1].maps;
+    const dependency = {
+      active: true,
+      parent: { api_name: "Current_Stage" },
+      child: { api_name: "Matter_Progress" },
+    };
+    const invoke = jest.fn()
+      .mockResolvedValueOnce({
+        map_dependency: [{ ...dependency, id: "dependency-1", pick_list_values: [] }],
+      })
+      .mockResolvedValueOnce({
+        map_dependency: [{
+          ...dependency,
+          id: "dependency-1",
+          pick_list_values: [
+            { actual_value: "Open", maps: [{ actual_value: "Detailed value" }] },
+            { actual_value: "Closed", maps: [] },
+          ],
+        }],
+      });
+    window.ZOHO = {
+      CRM: {
+        META: { getLayouts: jest.fn().mockResolvedValue(response) },
+        CONNECTION: { invoke },
+      },
+    };
+    try {
+      let fetchMatterPicklistMetadata;
+      jest.isolateModules(() => {
+        ({ fetchMatterPicklistMetadata } = require("./matterMetadata"));
+      });
+
+      const metadata = await fetchMatterPicklistMetadata({
+        $layout_id: { id: "layout-1" },
+      });
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(metadata.progressByStage).toEqual({
+        Open: ["Detailed value"],
+        Closed: [],
+      });
+      expect(metadata.dependencyError).toBeNull();
+    } finally {
+      window.ZOHO = previousZoho;
+    }
+  });
+
   test("reports a missing dependency scope when layout rules are absent", async () => {
     const previousZoho = window.ZOHO;
     const response = JSON.parse(JSON.stringify(layoutResponse));
@@ -250,10 +397,7 @@ describe("Application History Matter metadata", () => {
       expect(metadata.dependencyError).toBe(
         "OAUTH_SCOPE_MISMATCH: invalid oauth scope"
       );
-      expect(getProgressOptions(metadata, "Open")).toEqual([
-        "Collecting",
-        "Lodged",
-      ]);
+      expect(getProgressOptions(metadata, "Open")).toEqual([]);
       expect(invoke).toHaveBeenCalledTimes(1);
     } finally {
       window.ZOHO = previousZoho;

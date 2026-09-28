@@ -9,7 +9,6 @@ import {
 import {
   getRegardingOptions,
   getResultOptions,
-  shouldOfferManualOther,
 } from "./helperFunc";
 import {
   getDurationOptionsFromConfig,
@@ -115,8 +114,5 @@ describe("matter history category and duration options", () => {
       "Agenda",
       "Old regarding",
     ]);
-    expect(shouldOfferManualOther(config, ["Agenda"])).toBe(false);
-    expect(shouldOfferManualOther(config, ["Agenda", "Other"])).toBe(true);
-    expect(shouldOfferManualOther({ _source: "fallback" }, [])).toBe(true);
   });
 });

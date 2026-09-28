@@ -3,15 +3,16 @@ import {
   APPLICATION_HISTORY_MATTER_FIELDS,
   MATTER_SOURCE_FIELDS,
 } from "../config/config";
+import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
 
 const normalizeSingleValue = (value) => {
   if (Array.isArray(value)) return normalizeSingleValue(value[0]);
   if (value && typeof value === "object") {
-    return String(
-      value.actual_value ?? value.display_value ?? value.value ?? value.name ?? ""
-    ).trim();
+    return canonicalizeMatterPicklistValue(
+      value.display_value ?? value.actual_value ?? value.value ?? value.name ?? ""
+    );
   }
-  return value == null ? "" : String(value).trim();
+  return canonicalizeMatterPicklistValue(value);
 };
 
 export const serializeMatterProgress = (value, dataType) => {
@@ -59,7 +60,7 @@ export const buildApplicationHistorySummary = (formData, progressFieldType) => {
   const fields = APPLICATION_HISTORY_MATTER_FIELDS;
   return {
     [fields.matterNo]: formData.matterNo || null,
-    [fields.currentStage]: formData.currentStage || null,
+    [fields.currentStage]: normalizeSingleValue(formData.currentStage) || null,
     [fields.matterProgress]: serializeMatterProgress(
       formData.matterProgress,
       progressFieldType
