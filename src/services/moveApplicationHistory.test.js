@@ -659,7 +659,117 @@ const makeMatterMoveCrm = ({
 };
 
 describe("Application History to another Matter move", () => {
-  test("reassigns the same record, applies the destination snapshot and adds the Contact", async () => {
+  test("keeps saved Stage and Progress instead of replacing them from the destination Matter", () => {
+    const crm = makeMatterMoveCrm({
+      sourceOverrides: {
+        Current_Stage: "1. Enquiry",
+        Matter_Progress: ["Awaiting Advisor response"],
+      },
+      matterOverrides: {
+        Current_Stage: "6. Preparation",
+        Matter_Progress: ["Draft completed"],
+      },
+    });
+
+    expect(buildMatterMovePayload(crm.source, crm.matter, crm.contact))
+      .toMatchObject({
+        Current_Stage: "1. Enquiry",
+        Matter_Progress: ["Awaiting Advisor response"],
+      });
+  });
+
+  test("uses the destination Matter Stage and Progress when the History has no saved values", () => {
+    const crm = makeMatterMoveCrm({
+      sourceOverrides: {
+        Current_Stage: "",
+        Matter_Progress: [],
+      },
+    });
+
+    expect(buildMatterMovePayload(crm.source, crm.matter, crm.contact))
+      .toMatchObject({
+        Current_Stage: "6. Preparation",
+        Matter_Progress: ["Draft completed"],
+      });
+  });
+
+  test("treats Zoho's -None- sentinel as an empty saved value", () => {
+    const crm = makeMatterMoveCrm({
+      sourceOverrides: {
+        Current_Stage: "-None-",
+        Matter_Progress: "-None-",
+      },
+    });
+
+    expect(buildMatterMovePayload(crm.source, crm.matter, crm.contact))
+      .toMatchObject({
+        Current_Stage: "6. Preparation",
+        Matter_Progress: ["Draft completed"],
+      });
+  });
+
+  test.each([
+    {
+      sourceOverrides: {
+        Current_Stage: "1. Enquiry",
+        Matter_Progress: null,
+      },
+      expected: {
+        Current_Stage: "1. Enquiry",
+        Matter_Progress: ["Draft completed"],
+      },
+    },
+    {
+      sourceOverrides: {
+        Current_Stage: null,
+        Matter_Progress: ["Awaiting Advisor response"],
+      },
+      expected: {
+        Current_Stage: "6. Preparation",
+        Matter_Progress: ["Awaiting Advisor response"],
+      },
+    },
+  ])("falls back to the destination Matter independently for an empty summary field", ({
+    sourceOverrides,
+    expected,
+  }) => {
+    const crm = makeMatterMoveCrm({ sourceOverrides });
+
+    expect(buildMatterMovePayload(crm.source, crm.matter, crm.contact))
+      .toMatchObject(expected);
+  });
+
+  test("keeps scalar Matter Progress scalar for a picklist field", () => {
+    const crm = makeMatterMoveCrm({
+      sourceOverrides: { Matter_Progress: "Awaiting Advisor response" },
+    });
+
+    expect(buildMatterMovePayload(crm.source, crm.matter, crm.contact).Matter_Progress)
+      .toBe("Awaiting Advisor response");
+  });
+
+  test("uses the Stage and Progress currently visible in the edit form", async () => {
+    const crm = makeMatterMoveCrm();
+
+    await moveApplicationHistoryToMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationContactId: "contact-2",
+      historySummary: {
+        Current_Stage: "5. Document Collection",
+        Matter_Progress: "Documents under review",
+      },
+      delay: async () => {},
+    });
+
+    expect(crm.api.updateRecord.mock.calls[0][0].APIData).toMatchObject({
+      Current_Stage: "5. Document Collection",
+      Matter_Progress: "Documents under review",
+    });
+  });
+
+  test("reassigns the same record, preserves its saved summary and adds the Contact", async () => {
     const crm = makeMatterMoveCrm();
     await expect(moveApplicationHistoryToMatter({
       ZOHO: crm.ZOHO,
@@ -680,8 +790,8 @@ describe("Application History to another Matter move", () => {
       Name: "2A - Old Contact",
       Application: { id: "matter-2" },
       Matter_No: "2A",
-      Current_Stage: "6. Preparation",
-      Matter_Progress: ["Draft completed"],
+      Current_Stage: "1. Enquiry",
+      Matter_Progress: ["Initial information requested"],
       Stakeholder: { id: "stakeholder-new" },
       History_Details: "Original details",
       Owner: { id: "owner-1" },
@@ -709,8 +819,8 @@ describe("Application History to another Matter move", () => {
       Name: "2A - Old Contact",
       Application: { id: "matter-2" },
       Matter_No: "2A",
-      Current_Stage: "6. Preparation",
-      Matter_Progress: ["Draft completed"],
+      Current_Stage: "1. Enquiry",
+      Matter_Progress: ["Initial information requested"],
       Stakeholder: { id: "stakeholder-new" },
     });
     expect(movePayload).not.toHaveProperty("History_Details");
@@ -735,7 +845,7 @@ describe("Application History to another Matter move", () => {
 
   test("preserves every Matter Progress value and accepts object-shaped reordered readback", async () => {
     const crm = makeMatterMoveCrm({
-      matterOverrides: {
+      sourceOverrides: {
         Matter_Progress: ["Ready for lodgement", "Draft completed"],
       },
       verificationOverride: {
@@ -751,6 +861,7 @@ describe("Application History to another Matter move", () => {
       sourceId: "application-history-1",
       destinationMatterId: "matter-2",
       destinationContactId: "contact-2",
+      historySummary: {},
       delay: async () => {},
     })).resolves.toMatchObject({ destination: "matter" });
     expect(crm.api.updateRecord.mock.calls[0][0].APIData.Matter_Progress)
@@ -775,6 +886,7 @@ describe("Application History to another Matter move", () => {
 
   test("treats a null Matter Progress payload and empty CRM readback as equivalent", async () => {
     const crm = makeMatterMoveCrm({
+      sourceOverrides: { Matter_Progress: null },
       matterOverrides: { Matter_Progress: null },
       verificationOverride: { Matter_Progress: [] },
     });

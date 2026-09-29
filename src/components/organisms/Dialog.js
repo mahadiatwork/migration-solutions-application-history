@@ -57,7 +57,9 @@ import Stakeholder from "../atoms/Stakeholder";
 import { Close } from "@mui/icons-material";
 import { MATTERS_MODULE } from "../../config/config";
 import {
+  buildApplicationHistoryMoveSummary,
   buildApplicationHistorySummary,
+  hasSavedMatterSummary,
   inferMatterProgressFieldType,
   matterSummaryForEdit,
   matterSummaryFromSource,
@@ -75,6 +77,11 @@ const EMPTY_MATTER_METADATA = {
   progress: [],
   progressByStage: {},
   dependencyError: null,
+};
+
+const EMPTY_MOVE_SUMMARY_FIELDS = {
+  currentStage: false,
+  matterProgress: false,
 };
 
 const VisuallyHiddenInput = styled("input")({
@@ -163,6 +170,9 @@ export function Dialog({
   const [loadedAttachmentFromRecord, setLoadedAttachmentFromRecord] =
     React.useState();
   const [formData, setFormData] = React.useState(selectedRowData || {}); // Form data state
+  const [moveSummaryFields, setMoveSummaryFields] = React.useState(
+    EMPTY_MOVE_SUMMARY_FIELDS
+  );
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isMatterLoading, setIsMatterLoading] = React.useState(false);
   const [matterLoadError, setMatterLoadError] = React.useState("");
@@ -181,6 +191,10 @@ export function Dialog({
   React.useLayoutEffect(() => {
     setIsMatterLoading(Boolean(openDialog));
   }, [openDialog, selectedRowData?.id, currentModuleData?.id]);
+
+  React.useEffect(() => {
+    setMoveSummaryFields(EMPTY_MOVE_SUMMARY_FIELDS);
+  }, [openDialog, selectedRowData?.id]);
 
   const handleSelectFile = async (e) => {
     e.preventDefault();
@@ -335,6 +349,11 @@ export function Dialog({
         if (!cancelled) {
           setFormData((previous) => ({ ...previous, ...summary }));
           setSourceMatterId(sourceMatter?.id || savedHistory?.Application?.id || null);
+          const usesSourceMatterSummary = !hasSavedMatterSummary(savedHistory);
+          setMoveSummaryFields({
+            currentStage: usesSourceMatterSummary && Boolean(summary.currentStage),
+            matterProgress: usesSourceMatterSummary && Boolean(summary.matterProgress),
+          });
         }
 
         let dataType = inferMatterProgressFieldType(
@@ -433,13 +452,32 @@ export function Dialog({
   const handleCurrentStageChange = (nextStage) => {
     const currentStage = normalizePicklistValue(nextStage);
     const allowedProgress = getProgressOptions(matterMetadata, currentStage);
+    const matterProgress = allowedProgress.includes(formData.matterProgress)
+      ? formData.matterProgress
+      : "";
+    if (currentStage !== formData.currentStage) {
+      setMoveSummaryFields((previous) => ({
+        ...previous,
+        currentStage: true,
+        matterProgress:
+          previous.matterProgress || matterProgress !== formData.matterProgress,
+      }));
+    }
     setFormData((previous) => ({
       ...previous,
       currentStage,
-      matterProgress: allowedProgress.includes(previous.matterProgress)
-        ? previous.matterProgress
-        : "",
+      matterProgress,
     }));
+  };
+
+  const handleMatterProgressChange = (matterProgress) => {
+    if (matterProgress !== formData.matterProgress) {
+      setMoveSummaryFields((previous) => ({
+        ...previous,
+        matterProgress: true,
+      }));
+    }
+    handleInputChange("matterProgress", matterProgress);
   };
 
   const handleSubmit = async (event) => {
@@ -930,7 +968,7 @@ export function Dialog({
                 <Select
                   value={formData.matterProgress || ""}
                   onChange={(event) =>
-                    handleInputChange("matterProgress", event.target.value)
+                    handleMatterProgressChange(event.target.value)
                   }
                   label="Matter Progress"
                 >
@@ -1472,6 +1510,12 @@ export function Dialog({
         contacts={contacts}
         ZOHO={ZOHO}
         selectedRowData={selectedRowData}
+        historySummary={buildApplicationHistoryMoveSummary(
+          formData,
+          progressFieldType,
+          moveSummaryFields
+        )}
+        matterSummaryReady={!isMatterLoading && !matterLoadError}
         sourceMatterId={
           sourceMatterId ||
           (isMatterContext ? currentModuleData?.id : null) ||

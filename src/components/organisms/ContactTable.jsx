@@ -205,6 +205,8 @@ export const ContactDialog = ({
   ZOHO,
   selectedRowData,
   sourceMatterId,
+  historySummary,
+  matterSummaryReady = true,
   onRecordMoved,
 }) => {
   const [selectedContactId, setSelectedContactId] = useState(null);
@@ -435,6 +437,14 @@ export const ContactDialog = ({
   };
 
   const handleMatterSelect = async () => {
+    if (!matterSummaryReady) {
+      setSnackbar({
+        open: true,
+        message: "Wait for the History Matter summary to finish loading.",
+        severity: "info",
+      });
+      return;
+    }
     if (!selectedContactId || !selectedMatterId || !selectedRowData?.id) {
       setSnackbar({
         open: true,
@@ -459,6 +469,7 @@ export const ContactDialog = ({
         sourceId: selectedRowData.id,
         destinationMatterId: selectedMatterId,
         destinationContactId: selectedContactId,
+        historySummary,
       });
       if (onRecordMoved) onRecordMoved(selectedRowData.id);
       setSnackbar({
@@ -627,6 +638,7 @@ export const ContactDialog = ({
               !selectedContactId ||
               !selectedMatterId ||
               !sourceMatterId ||
+              !matterSummaryReady ||
               isSearching ||
               isMoving
             }

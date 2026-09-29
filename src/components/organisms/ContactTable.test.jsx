@@ -42,6 +42,11 @@ const renderDialog = (overrides = {}) => {
     ZOHO: { CRM: { API: { searchRecord: jest.fn() } } },
     selectedRowData: { id: "history-1" },
     sourceMatterId: "matter-current",
+    historySummary: {
+      Current_Stage: "1. Enquiry",
+      Matter_Progress: "Awaiting Advisor response",
+    },
+    matterSummaryReady: true,
     onRecordMoved: jest.fn(),
     ...overrides,
   };
@@ -57,7 +62,7 @@ describe("ContactDialog Matter destinations", () => {
   });
 
   test("loads the selected Contact's Matters and moves to a different Matter", async () => {
-    const { ZOHO, onRecordMoved, handleContactDialogClose } = renderDialog();
+    const { ZOHO, onRecordMoved, handleContactDialogClose, historySummary } = renderDialog();
 
     fireEvent.click(screen.getByText("Alice"));
     fireEvent.click(screen.getByRole("button", { name: "View Contact Matters" }));
@@ -82,6 +87,7 @@ describe("ContactDialog Matter destinations", () => {
         sourceId: "history-1",
         destinationMatterId: "matter-2",
         destinationContactId: "contact-1",
+        historySummary,
       });
     });
     await waitFor(() => expect(handleContactDialogClose).toHaveBeenCalled());
@@ -99,6 +105,18 @@ describe("ContactDialog Matter destinations", () => {
 
     expect(screen.queryByText("Select Target Matter:")).toBeNull();
     expect(screen.getByRole("button", { name: "Move to Selected Matter" }).disabled).toBe(true);
+  });
+
+  test("waits for the Matter summary before allowing a Matter move", async () => {
+    renderDialog({ matterSummaryReady: false });
+
+    fireEvent.click(screen.getByText("Alice"));
+    fireEvent.click(screen.getByRole("button", { name: "View Contact Matters" }));
+    await screen.findByText("Select Target Matter:");
+    fireEvent.click(screen.getByRole("radio", { name: "Select Matter 2" }));
+
+    expect(screen.getByRole("button", { name: "Move to Selected Matter" }).disabled)
+      .toBe(true);
   });
 
   test("keeps Contact History as an explicit destination", async () => {

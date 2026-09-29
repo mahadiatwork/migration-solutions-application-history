@@ -7,12 +7,15 @@ import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
 
 const normalizeSingleValue = (value) => {
   if (Array.isArray(value)) return normalizeSingleValue(value[0]);
+  let normalized;
   if (value && typeof value === "object") {
-    return canonicalizeMatterPicklistValue(
+    normalized = canonicalizeMatterPicklistValue(
       value.display_value ?? value.actual_value ?? value.value ?? value.name ?? ""
     );
+  } else {
+    normalized = canonicalizeMatterPicklistValue(value);
   }
-  return canonicalizeMatterPicklistValue(value);
+  return normalized === "-None-" ? "" : normalized;
 };
 
 export const serializeMatterProgress = (value, dataType) => {
@@ -36,17 +39,22 @@ export const matterSummaryFromSource = (matter) => ({
   billingType: DEFAULT_BILLING_TYPE,
 });
 
+export const hasSavedMatterSummary = (history) => {
+  const fields = APPLICATION_HISTORY_MATTER_FIELDS;
+  return Boolean(
+    normalizeSingleValue(history?.[fields.matterNo]) ||
+    normalizeSingleValue(history?.[fields.currentStage]) ||
+    normalizeSingleValue(history?.[fields.matterProgress])
+  );
+};
+
 /** An existing History record owns any values the user previously changed. */
 export const matterSummaryForEdit = (matter, history) => {
   const source = matterSummaryFromSource(matter);
   const fields = APPLICATION_HISTORY_MATTER_FIELDS;
   const savedStage = normalizeSingleValue(history?.[fields.currentStage]);
   const savedProgress = normalizeSingleValue(history?.[fields.matterProgress]);
-  const hasSavedSummary = Boolean(
-    normalizeSingleValue(history?.[fields.matterNo]) ||
-    savedStage ||
-    savedProgress
-  );
+  const hasSavedSummary = hasSavedMatterSummary(history);
   return {
     matterNo: source.matterNo || normalizeSingleValue(history?.[fields.matterNo]),
     currentStage: hasSavedSummary ? savedStage : source.currentStage,
@@ -66,6 +74,24 @@ export const buildApplicationHistorySummary = (formData, progressFieldType) => {
       progressFieldType
     ),
     [fields.billingType]: formData.billingType || DEFAULT_BILLING_TYPE,
+  };
+};
+
+/** Only authoritative form fields may override the full CRM record during a move. */
+export const buildApplicationHistoryMoveSummary = (
+  formData,
+  progressFieldType,
+  includedFields = {}
+) => {
+  const fields = APPLICATION_HISTORY_MATTER_FIELDS;
+  const summary = buildApplicationHistorySummary(formData, progressFieldType);
+  return {
+    ...(includedFields.currentStage
+      ? { [fields.currentStage]: summary[fields.currentStage] }
+      : {}),
+    ...(includedFields.matterProgress
+      ? { [fields.matterProgress]: summary[fields.matterProgress] }
+      : {}),
   };
 };
 

@@ -1,5 +1,7 @@
 import {
+  buildApplicationHistoryMoveSummary,
   buildApplicationHistorySummary,
+  hasSavedMatterSummary,
   inferMatterProgressFieldType,
   matterSummaryForEdit,
   matterSummaryFromSource,
@@ -54,6 +56,8 @@ describe("Application History Matter summary", () => {
     expect(matterSummaryForEdit(matter, {}).currentStage).toBe(
       "2. Consultation/Strategy & Eligibility"
     );
+    expect(hasSavedMatterSummary({})).toBe(false);
+    expect(hasSavedMatterSummary({ Matter_No: "MAT-1001" })).toBe(true);
   });
 
   test("serializes the History fields without changing the source Matter", () => {
@@ -71,6 +75,66 @@ describe("Application History Matter summary", () => {
     expect(inferMatterProgressFieldType({ Matter_Progress: "Review" }, matter))
       .toBe("picklist");
     expect(matter.Matter_Progress).toEqual(["Consultation confirmed"]);
+  });
+
+  test("does not override a complete CRM summary when the form fields are unchanged", () => {
+    expect(
+      buildApplicationHistoryMoveSummary(
+        {
+          currentStage: "6. Preparation",
+          matterProgress: "Ready for lodgement",
+        },
+        "multiselectpicklist",
+        { currentStage: false, matterProgress: false }
+      )
+    ).toEqual({});
+  });
+
+  test("moves source Matter fallback values shown for a legacy History", () => {
+    const legacyHistory = {
+      Current_Stage: "-None-",
+      Matter_Progress: ["-None-"],
+    };
+    const displayedSummary = matterSummaryForEdit(matter, legacyHistory);
+    const usesSourceMatterSummary = !hasSavedMatterSummary(legacyHistory);
+
+    expect(usesSourceMatterSummary).toBe(true);
+
+    expect(
+      buildApplicationHistoryMoveSummary(
+        displayedSummary,
+        "multiselectpicklist",
+        {
+          currentStage: usesSourceMatterSummary,
+          matterProgress: usesSourceMatterSummary,
+        }
+      )
+    ).toEqual({
+      Current_Stage: "2. Consultation/Strategy & Eligibility",
+      Matter_Progress: ["Consultation confirmed"],
+    });
+  });
+
+  test("includes only the summary fields explicitly edited in the form", () => {
+    const formData = {
+      currentStage: "6. Preparation",
+      matterProgress: "Ready for lodgement",
+    };
+
+    expect(
+      buildApplicationHistoryMoveSummary(
+        formData,
+        "multiselectpicklist",
+        { currentStage: true, matterProgress: false }
+      )
+    ).toEqual({ Current_Stage: "6. Preparation" });
+    expect(
+      buildApplicationHistoryMoveSummary(
+        formData,
+        "multiselectpicklist",
+        { currentStage: false, matterProgress: true }
+      )
+    ).toEqual({ Matter_Progress: ["Ready for lodgement"] });
   });
 
   test("normalizes source metadata aliases before saving the History snapshot", () => {

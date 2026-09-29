@@ -380,16 +380,19 @@ export async function moveApplicationHistoryToMain({
 const normalizeMatterValue = (value) => {
   const first = Array.isArray(value) ? value[0] : value;
   if (first == null) return "";
+  let normalized;
   if (typeof first === "object") {
-    return canonicalizeMatterPicklistValue(
+    normalized = canonicalizeMatterPicklistValue(
       first.display_value ??
         first.actual_value ??
         first.value ??
         first.name ??
         ""
     );
+  } else {
+    normalized = canonicalizeMatterPicklistValue(first);
   }
-  return canonicalizeMatterPicklistValue(first);
+  return normalized === "-None-" ? "" : normalized;
 };
 
 const normalizeZohoText = (value, { trim = false } = {}) => {
@@ -419,6 +422,12 @@ const normalizeMatterValues = (value) => {
     .map((item) => normalizeMatterValue(item))
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right));
+};
+
+const normalizeMatterProgressPayload = (value) => {
+  const normalized = normalizeMatterValues(value);
+  if (!normalized.length) return null;
+  return Array.isArray(value) ? normalized : normalized[0];
 };
 
 const sameMatterValues = (left, right) => {
@@ -476,15 +485,19 @@ export const buildMatterMovePayload = (source, matter, contact) => {
     throw new Error("The source History and destination Matter are required.");
   }
   const stakeholder = destinationStakeholder(matter, contact);
-  const matterProgress = normalizeMatterValues(matter.Matter_Progress);
+  const savedStage = normalizeMatterValue(source.Current_Stage);
+  const savedProgress = normalizeMatterProgressPayload(source.Matter_Progress);
+  const matterProgress = savedProgress ??
+    normalizeMatterProgressPayload(matter.Matter_Progress);
   return {
     id: String(source.id),
     ...preservedHistoryContent(source),
     Name: updatedHistoryName(source, matter),
     Application: { id: String(matter.id) },
     Matter_No: matter.Name ?? null,
-    Current_Stage: normalizeMatterValue(matter.Current_Stage) || null,
-    Matter_Progress: matterProgress.length ? matterProgress : null,
+    Current_Stage:
+      savedStage || normalizeMatterValue(matter.Current_Stage) || null,
+    Matter_Progress: matterProgress,
     Stakeholder: stakeholder ? { id: String(recordId(stakeholder)) } : null,
   };
 };
@@ -856,6 +869,7 @@ export async function moveApplicationHistoryToMatter({
   sourceId,
   destinationMatterId,
   destinationContactId,
+  historySummary,
   delay = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
 }) {
@@ -878,7 +892,16 @@ export async function moveApplicationHistoryToMatter({
     throw new Error("The selected Matter is no longer associated with this Contact.");
   }
   const contact = await readRecord(api, "Contacts", destinationContactId);
-  const payload = buildMatterMovePayload(source, matter, contact);
+  const sourceWithVisibleSummary = {
+    ...source,
+    ...(Object.prototype.hasOwnProperty.call(historySummary || {}, "Current_Stage")
+      ? { Current_Stage: historySummary.Current_Stage }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(historySummary || {}, "Matter_Progress")
+      ? { Matter_Progress: historySummary.Matter_Progress }
+      : {}),
+  };
+  const payload = buildMatterMovePayload(sourceWithVisibleSummary, matter, contact);
   const rollbackPayload = originalMatterPayload(source);
   const originalLinks = await readRelated(
     api,
