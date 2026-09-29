@@ -1417,7 +1417,7 @@ describe("Stakeholder Matter lookup", () => {
     expect(getRelatedRecords).toHaveBeenCalledWith(expect.objectContaining({
       Entity: "Accounts",
       RecordID: "stakeholder-2",
-      RelatedList: "Applications",
+      RelatedList: "Applications1",
       page: 1,
       per_page: 200,
     }));

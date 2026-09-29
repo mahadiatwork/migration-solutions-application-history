@@ -7,6 +7,7 @@ const SOURCE_CONTACT_LIST = "Contacts4";
 const TARGET_CONTACT_LIST = "Contacts3";
 const MATTERS_MODULE = "Applications";
 const MATTER_CONTACT_LIST = "Applications";
+const STAKEHOLDER_MATTER_LIST = "Applications1";
 const APPLICATION_HISTORY_CONTACT_MODULE = "Application_Hstory";
 const PAGE_SIZE = 200;
 const ATTACHMENT_CHECK_DELAYS_MS = [0, 250, 750, 1500];
@@ -931,7 +932,7 @@ export async function fetchStakeholderMatters({
     const response = await ZOHO.CRM.API.getRelatedRecords({
       Entity: "Accounts",
       RecordID: stakeholderId,
-      RelatedList: MATTER_CONTACT_LIST,
+      RelatedList: STAKEHOLDER_MATTER_LIST,
       page,
       per_page: PAGE_SIZE,
       fields,
