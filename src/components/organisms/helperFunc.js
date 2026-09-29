@@ -1,5 +1,15 @@
 import { mandatoryActivityTypes, mergeOrderedUnique } from "./dialogConstants";
 
+export const CUSTOM_REGARDING_VALUE = "__custom_regarding__";
+
+const RESERVED_REGARDING_VALUES = new Set([
+  "Custom",
+  CUSTOM_REGARDING_VALUE,
+]);
+
+const removeReservedRegardingValues = (options) =>
+  options.filter((option) => !RESERVED_REGARDING_VALUES.has(option));
+
 /**
  * Result and Regarding options.
  *
@@ -114,7 +124,9 @@ export const getRegardingOptions = (type, existingValue, config) => {
           ? configuredRegarding._default
           : [])
         : [];
-    return mergeOrderedUnique(source, [existingValue]);
+    return removeReservedRegardingValues(
+      mergeOrderedUnique(source, [existingValue])
+    );
   }
 
   const options = {
@@ -150,5 +162,5 @@ export const getRegardingOptions = (type, existingValue, config) => {
     predefinedOptions = [safeValue, ...predefinedOptions];
   }
 
-  return predefinedOptions;
+  return removeReservedRegardingValues(predefinedOptions);
 };

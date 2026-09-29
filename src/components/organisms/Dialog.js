@@ -31,10 +31,10 @@ import {
   resolveModuleStakeholder,
 } from "./helperFunc";
 import {
-  DEFAULT_ACTIVITY_TYPE,
   DEFAULT_BILLING_TYPE,
   billingTypeOptions,
   durationOptions as fallbackDurationOptions,
+  getMatterHistoryCreateDefaults,
   typeOptions as fallbackTypeOptions,
   resultMapping as fallbackResultMapping,
   mergeOrderedUnique,
@@ -239,16 +239,17 @@ export function Dialog({
     if (openDialog) {
       setIsSubmitting(false);
       setFormData((prev) => {
+        const createDefaults = selectedRowData
+          ? { type: "", result: "", regarding: "" }
+          : getMatterHistoryCreateDefaults(typeOptions, (type) =>
+            getResultOptions(type, picklistConfig)
+          );
         const defaultType = selectedRowData
           ? selectedRowData?.type ?? ""
-          : typeOptions[0] || "";
+          : createDefaults.type;
         const defaultResult = selectedRowData
           ? selectedRowData?.result ?? ""
-          : getResultOptions(defaultType, picklistConfig)[0] ||
-            resultMapping[defaultType] ||
-            (picklistConfig?._source === "custom_module"
-              ? ""
-              : DEFAULT_ACTIVITY_TYPE);
+          : createDefaults.result;
         const sourceSummary = matterSummaryFromSource(
           isMatterContext ? currentModuleData : null
         );
@@ -263,7 +264,7 @@ export function Dialog({
             const n = Number(d);
             return Number.isFinite(n) ? n : null;
           })(),
-          regarding: selectedRowData?.regarding || "",
+          regarding: selectedRowData?.regarding ?? createDefaults.regarding,
           details: selectedRowData?.details || "",
           ...sourceSummary,
           currentStage:

@@ -66,6 +66,71 @@ describe("RegardingField", () => {
     expect(screen.queryByRole("option", { name: "2nd Followup" })).toBeNull();
   });
 
+  test.each([
+    ["CRM configuration is unavailable", undefined, "Call"],
+    [
+      "CRM configuration has no Regarding mappings",
+      { _source: "custom_module", regarding: {} },
+      "Unconfigured activity",
+    ],
+    [
+      "the selected activity has an explicitly empty Regarding list",
+      {
+        _source: "custom_module",
+        regarding: { "Unconfigured activity": [] },
+      },
+      "Unconfigured activity",
+    ],
+  ])("offers Custom when %s", (_description, config, result) => {
+    render(
+      <RegardingField
+        formData={{
+          type: "Communication & Meetings",
+          result,
+          regarding: "",
+        }}
+        handleInputChange={jest.fn()}
+        selectedRowData={null}
+        picklistConfig={config}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getByRole("option", { name: "Custom" })).not.toBeNull();
+  });
+
+  test("reserves Custom for manual entry when CRM configuration contains reserved values", () => {
+    const handleInputChange = jest.fn();
+    render(
+      <RegardingField
+        formData={{
+          type: "Communication & Meetings",
+          result: "Call",
+          regarding: "",
+        }}
+        handleInputChange={handleInputChange}
+        selectedRowData={null}
+        picklistConfig={{
+          _source: "custom_module",
+          regarding: {
+            Call: ["Follow up", "Custom", "__custom_regarding__"],
+          },
+        }}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getAllByRole("option", { name: "Custom" })).toHaveLength(1);
+    expect(
+      screen.queryByRole("option", { name: "__custom_regarding__" })
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("option", { name: "Custom" }));
+    expect(screen.getByLabelText("Custom Regarding")).not.toBeNull();
+    expect(handleInputChange).toHaveBeenCalledWith("regarding", "");
+    expect(handleInputChange).not.toHaveBeenCalledWith("regarding", "Custom");
+  });
+
   test("always offers Custom and saves only the typed text", () => {
     const Harness = () => {
       const [formData, setFormData] = React.useState({

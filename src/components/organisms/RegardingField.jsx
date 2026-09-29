@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FormControl, InputLabel, Select, MenuItem, TextField, Box } from "@mui/material";
-import { getRegardingOptions } from "./helperFunc";
-
-const CUSTOM_REGARDING_VALUE = "__custom_regarding__";
+import {
+  CUSTOM_REGARDING_VALUE,
+  getRegardingOptions,
+} from "./helperFunc";
 
 const RegardingField = ({ formData, handleInputChange, selectedRowData, picklistConfig }) => {
   const existingValue = formData?.regarding ?? selectedRowData?.regarding ?? "";

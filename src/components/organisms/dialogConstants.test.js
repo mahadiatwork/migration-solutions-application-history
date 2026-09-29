@@ -2,6 +2,7 @@ import {
   DEFAULT_ACTIVITY_TYPE,
   DEFAULT_CATEGORY,
   durationOptions,
+  getMatterHistoryCreateDefaults,
   mandatoryActivityTypes,
   mandatoryCategoryOptions,
   serializeDuration,
@@ -27,6 +28,59 @@ describe("matter history category and duration options", () => {
     expect(DEFAULT_ACTIVITY_TYPE).toBe(
       mandatoryActivityTypes[DEFAULT_CATEGORY][0]
     );
+  });
+
+  test("create defaults use the canonical category and activity regardless of option order", () => {
+    const config = {
+      _source: "custom_module",
+      results: {
+        Fruit: ["Apple"],
+        [DEFAULT_CATEGORY]: ["Email", DEFAULT_ACTIVITY_TYPE],
+      },
+      regarding: {
+        Apple: ["Pear"],
+      },
+    };
+
+    expect(
+      getMatterHistoryCreateDefaults(
+        ["Fruit", DEFAULT_CATEGORY],
+        (type) => getResultOptions(type, config)
+      )
+    ).toEqual({
+      type: DEFAULT_CATEGORY,
+      result: DEFAULT_ACTIVITY_TYPE,
+      regarding: "",
+    });
+  });
+
+  test("create defaults never promote Fruit, Apple, or Pear", () => {
+    const config = {
+      _source: "custom_module",
+      results: { Fruit: ["Apple"] },
+      regarding: { Apple: ["Pear"] },
+    };
+    const getResults = jest.fn((type) => getResultOptions(type, config));
+
+    expect(getMatterHistoryCreateDefaults(["Fruit"], getResults)).toEqual({
+      type: "",
+      result: "",
+      regarding: "",
+    });
+    expect(getResults).not.toHaveBeenCalled();
+  });
+
+  test("create defaults leave activity blank when Call is unavailable", () => {
+    expect(
+      getMatterHistoryCreateDefaults(
+        [DEFAULT_CATEGORY],
+        () => ["Apple"]
+      )
+    ).toEqual({
+      type: DEFAULT_CATEGORY,
+      result: "",
+      regarding: "",
+    });
   });
 
   test("uses exact-parent then default configured results and only preserves an explicitly supplied edit value", () => {
@@ -114,5 +168,16 @@ describe("matter history category and duration options", () => {
       "Agenda",
       "Old regarding",
     ]);
+  });
+
+  test("removes reserved Custom values while preserving configured Other", () => {
+    const config = {
+      _source: "custom_module",
+      regarding: {
+        Call: ["Custom", "Other", "__custom_regarding__"],
+      },
+    };
+
+    expect(getRegardingOptions("Call", "Custom", config)).toEqual(["Other"]);
   });
 });

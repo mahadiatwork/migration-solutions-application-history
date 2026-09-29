@@ -90,6 +90,21 @@ export const mergeCategoryOptions = (configuredOptions = []) =>
     legacyTypeOptions
   );
 
+export const getMatterHistoryCreateDefaults = (types, getResults) => {
+  if (!types.includes(DEFAULT_CATEGORY)) {
+    return { type: "", result: "", regarding: "" };
+  }
+
+  const results = getResults(DEFAULT_CATEGORY);
+  return {
+    type: DEFAULT_CATEGORY,
+    result: results.includes(DEFAULT_ACTIVITY_TYPE)
+      ? DEFAULT_ACTIVITY_TYPE
+      : "",
+    regarding: "",
+  };
+};
+
 export const mergeDurationOptions = (configuredOptions = []) => {
   const required = [...durationOptions];
   const seen = new Set(required);
