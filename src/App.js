@@ -37,6 +37,10 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Dialog as MUIDialog } from "@mui/material";
 import { useSnackbar } from "notistack";
 import LinkifyText from "./components/atoms/LinkifyText";
+import {
+  formatDateTimeForDisplay,
+  parseCrmDateTime,
+} from "./util/dateTime";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -52,7 +56,7 @@ const parentContainerStyle = {
 function isInLastNDays(date, pre) {
   const now = dayjs();
   const daysAgo = now.subtract(pre, "day");
-  return dayjs(date).isAfter(daysAgo);
+  return parseCrmDateTime(date)?.isAfter(daysAgo) ?? false;
 }
 
 const dateOptions = [
@@ -457,19 +461,19 @@ const App = () => {
       .filter((el) => (selectedType ? el?.type === selectedType : true))
       .filter((el) => {
         if (dateRange?.preDay) {
-          const isValidDate = dayjs(el?.date_time).isValid();
-          return isValidDate && isInLastNDays(el?.date_time, dateRange.preDay);
+          return isInLastNDays(el?.date_time, dateRange.preDay);
         }
         if (dateRange?.startDate && dateRange?.endDate) {
-          const rowDate = dayjs(el?.date_time);
+          const rowDate = parseCrmDateTime(el?.date_time);
           const start = dayjs(dateRange.startDate).startOf("day");
           const end = dayjs(dateRange.endDate).endOf("day");
-          return rowDate.isBetween(start, end, null, "[]");
+          return rowDate?.isBetween(start, end, null, "[]") ?? false;
         }
         if (dateRange?.custom) {
           const startDate = dayjs(dateRange.custom());
           const endDate = dayjs();
-          return dayjs(el?.date_time).isBetween(startDate, endDate, null, "[]");
+          const rowDate = parseCrmDateTime(el?.date_time);
+          return rowDate?.isBetween(startDate, endDate, null, "[]") ?? false;
         }
         return true;
       })
@@ -1040,7 +1044,8 @@ const App = () => {
                           <TableCell>{row.result || "No Result"}</TableCell>
                           <TableCell>
                             {row.date_time
-                              ? dayjs(row.date_time).format(
+                              ? formatDateTimeForDisplay(
+                                  row.date_time,
                                   "DD-MM-YYYY HH:mm A"
                                 )
                               : "No Date"}

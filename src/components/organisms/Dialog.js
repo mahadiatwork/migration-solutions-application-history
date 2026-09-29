@@ -45,6 +45,11 @@ import {
   getDurationOptionsFromConfig,
   getResultMappingFromConfig,
 } from "../../services/picklistConfigService";
+import {
+  formatDateTimeForCrm,
+  getDeviceTimezone,
+  parseCrmDateTime,
+} from "../../util/dateTime";
 import ContactField from "./ContactFields";
 import RegardingField from "./RegardingField";
 import IconButton from "@mui/material/IconButton"; // For the clickable icon button
@@ -279,7 +284,7 @@ export function Dialog({
             ? selectedRowData.stakeHolder
             : getModuleStakeholder(),
           date_time: selectedRowData?.date_time
-            ? dayjs(selectedRowData.date_time)
+            ? parseCrmDateTime(selectedRowData.date_time)
             : dayjs(),
         };
         return {
@@ -540,7 +545,7 @@ export function Dialog({
       History_Type: formData.type || "",
       Duration_Min: serializeDuration(formData.duration),
       Date: formData.date_time
-        ? dayjs(formData.date_time).format("YYYY-MM-DDTHH:mm:ssZ")
+        ? formatDateTimeForCrm(formData.date_time)
         : null,
       Application: { id: sourceMatterId },
       ...buildApplicationHistorySummary(
@@ -1139,6 +1144,7 @@ export function Dialog({
                       id="date_time"
                       label="Date & Time"
                       name="date_time"
+                      timezone={getDeviceTimezone()}
                       value={formData.date_time || dayjs()}
                       onChange={(newValue) =>
                         handleInputChange("date_time", newValue || dayjs())
@@ -1172,6 +1178,7 @@ export function Dialog({
                         textField: {
                           variant: "standard",
                           margin: "dense",
+                          helperText: `Timezone: ${getDeviceTimezone()}`,
                         },
                       }}
                     />
