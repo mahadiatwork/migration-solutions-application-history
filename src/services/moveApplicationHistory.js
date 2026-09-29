@@ -150,7 +150,9 @@ const buildHistoryPayload = (source, destination, destinationId, destinationName
     Stakeholder: destination === "stakeholder"
       ? { id: String(destinationId) }
       : sourceStakeholder ? { id: String(sourceStakeholder) } : null,
-    ...(recordId(source.Owner) ? { Owner: { id: String(recordId(source.Owner)) } } : {}),
+    ...(destination === "contact" && recordId(source.Owner)
+      ? { Owner: { id: String(recordId(source.Owner)) } }
+      : {}),
     // A return to main History must not retain a Matter or its cached fields.
     Matter: null,
     Matter_No: null,
@@ -274,8 +276,9 @@ export async function moveApplicationHistoryToMain({
     }
     const sourceAttachments = await checkedAttachments(listAttachments, SOURCE_MODULE, sourceId);
     const contactIds = new Set(
-      sourceLinks.map(sourceContactId)
-        .filter(Boolean).map(String)
+      destination === "contact"
+        ? sourceLinks.map(sourceContactId).filter(Boolean).map(String)
+        : []
     );
     if (destination === "contact") contactIds.add(String(destinationId));
 
@@ -900,6 +903,68 @@ export async function fetchContactMatters({
   );
 }
 
+/** Load every Matter shown in the selected Stakeholder's Applications related list. */
+export async function fetchStakeholderMatters({
+  ZOHO,
+  stakeholderId,
+  excludeMatterId = null,
+}) {
+  if (!ZOHO?.CRM?.API || !stakeholderId) {
+    throw new Error("Select a valid Stakeholder before loading Matters.");
+  }
+  const matters = [];
+  const seen = new Set();
+  const fields = [
+    "id",
+    "Name",
+    "Type_of_Application",
+    "Current_Stage",
+    "Matter_Progress",
+    "Stakeholder_1",
+    "Stakeholder_Auto",
+    "Stake_Holder",
+    "Contact_Name",
+    "Modified_Time",
+  ].join(",");
+
+  for (let page = 1; page <= 100; page += 1) {
+    const response = await ZOHO.CRM.API.getRelatedRecords({
+      Entity: "Accounts",
+      RecordID: stakeholderId,
+      RelatedList: MATTER_CONTACT_LIST,
+      page,
+      per_page: PAGE_SIZE,
+      fields,
+    });
+    if (response?.statusText?.toLowerCase() === "nocontent") break;
+    if (!Array.isArray(response?.data)) {
+      throw new Error("CRM did not return the selected Stakeholder's Matters.");
+    }
+    for (const matter of response.data) {
+      const id = recordId(matter);
+      if (!id || seen.has(String(id))) continue;
+      seen.add(String(id));
+      if (excludeMatterId && String(id) === String(excludeMatterId)) continue;
+      matters.push(matter);
+    }
+    const moreRecords = response?.info?.more_records === true;
+    if (
+      response?.info?.more_records === false ||
+      (!moreRecords && response.data.length < PAGE_SIZE)
+    ) break;
+    if (page === 100) {
+      throw new Error("This Stakeholder has too many Matters to display safely.");
+    }
+  }
+
+  return matters.sort((left, right) =>
+    String(left?.Name || "").localeCompare(String(right?.Name || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+}
+
 /**
  * Reassign an Applications_History record to another Matter in place.
  * Keeping the record ID preserves its attachments while the update and any new
@@ -1072,5 +1137,168 @@ export async function moveApplicationHistoryToMatter({
       ? ` Rollback needs attention: ${rollbackErrors.join("; ")}.`
       : " The History remains on its original Matter.";
     throw new Error(`${error.message || "Matter move failed."}${suffix}`);
+  }
+}
+
+/**
+ * Reassign an Applications_History record to one of a Stakeholder's Matters.
+ * The record stays in place to preserve attachments, but all Contact junctions
+ * are removed because this destination is Stakeholder-only.
+ */
+export async function moveApplicationHistoryToStakeholderMatter({
+  ZOHO,
+  sourceId,
+  destinationMatterId,
+  destinationStakeholderId,
+  historySummary,
+  delay = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
+  if (
+    !ZOHO?.CRM?.API ||
+    !sourceId ||
+    !destinationMatterId ||
+    !destinationStakeholderId
+  ) {
+    throw new Error("Select a valid Stakeholder and Matter destination.");
+  }
+
+  const api = ZOHO.CRM.API;
+  const source = await readRecord(api, SOURCE_MODULE, sourceId);
+  const sourceMatterId = recordId(source.Application);
+  if (!sourceMatterId) {
+    throw new Error("The source History is not linked to a Matter.");
+  }
+  if (String(sourceMatterId) === String(destinationMatterId)) {
+    throw new Error("Select a different Matter from the current one.");
+  }
+
+  const matter = await readRecord(api, MATTERS_MODULE, destinationMatterId);
+  const stakeholderIds = [
+    matter.Stakeholder_1,
+    matter.Stakeholder_Auto,
+    matter.Stake_Holder,
+    matter.Stakeholder,
+  ].map(recordId).filter(Boolean).map(String);
+  if (!stakeholderIds.includes(String(destinationStakeholderId))) {
+    throw new Error("The selected Matter is no longer associated with this Stakeholder.");
+  }
+
+  const sourceWithVisibleSummary = {
+    ...source,
+    ...(Object.prototype.hasOwnProperty.call(historySummary || {}, "Current_Stage")
+      ? { Current_Stage: historySummary.Current_Stage }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(historySummary || {}, "Matter_Progress")
+      ? { Matter_Progress: historySummary.Matter_Progress }
+      : {}),
+  };
+  const payload = {
+    ...buildMatterMovePayload(sourceWithVisibleSummary, matter, null),
+    Stakeholder: { id: String(destinationStakeholderId) },
+  };
+  const rollbackPayload = originalMatterPayload(source);
+  const originalLinks = await readRelated(
+    api,
+    SOURCE_MODULE,
+    sourceId,
+    SOURCE_CONTACT_LIST
+  );
+  if (originalLinks.some((link) => !recordId(link) || !targetContactId(link))) {
+    throw new Error("CRM returned an incomplete History Contact link.");
+  }
+
+  let updateAttempted = false;
+  let updateSucceeded = false;
+  try {
+    updateAttempted = true;
+    await updateApplicationHistory(
+      api,
+      sourceId,
+      matterDestinationUpdatePayload(payload),
+      "Move History to Stakeholder Matter"
+    );
+    updateSucceeded = true;
+    await verifyMatterDestinationWithRetry(
+      api,
+      sourceId,
+      payload,
+      destinationMatterId,
+      delay
+    );
+
+    const linksToRemove = await readRelated(
+      api,
+      SOURCE_MODULE,
+      sourceId,
+      SOURCE_CONTACT_LIST
+    );
+    if (linksToRemove.some((link) => !recordId(link) || !targetContactId(link))) {
+      throw new Error("CRM returned an incomplete History Contact link.");
+    }
+    for (const link of linksToRemove) {
+      successItem(await api.deleteRecord({
+        Entity: APPLICATION_HISTORY_CONTACT_MODULE,
+        RecordID: String(recordId(link)),
+      }), `Remove Contact link ${recordId(link)}`);
+    }
+    await verifyApplicationHistoryContactLinksWithRetry(
+      api,
+      sourceId,
+      new Map(),
+      delay
+    );
+    await verifyMatterDestinationWithRetry(
+      api,
+      sourceId,
+      payload,
+      destinationMatterId,
+      delay
+    );
+
+    return {
+      sourceId: String(sourceId),
+      targetId: String(sourceId),
+      destination: "stakeholder-matter",
+      matterId: String(destinationMatterId),
+      stakeholderId: String(destinationStakeholderId),
+    };
+  } catch (error) {
+    const rollbackErrors = [];
+    if (updateAttempted) {
+      try {
+        const current = await readRecord(api, SOURCE_MODULE, sourceId);
+        if (updateSucceeded || !sameMatterPayload(current, rollbackPayload)) {
+          await updateApplicationHistory(
+            api,
+            sourceId,
+            rollbackPayload,
+            "Restore original Matter"
+          );
+          await verifyMatterDestinationWithRetry(
+            api,
+            sourceId,
+            rollbackPayload,
+            sourceMatterId,
+            delay
+          );
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError.message);
+      }
+      try {
+        await restoreApplicationHistoryContactLinks(
+          api,
+          sourceId,
+          originalLinks
+        );
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError.message);
+      }
+    }
+    const suffix = rollbackErrors.length
+      ? ` Rollback needs attention: ${rollbackErrors.join("; ")}.`
+      : " The History remains on its original Matter.";
+    throw new Error(`${error.message || "Stakeholder Matter move failed."}${suffix}`);
   }
 }

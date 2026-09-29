@@ -1,8 +1,10 @@
 import {
   buildMatterMovePayload,
   fetchContactMatters,
+  fetchStakeholderMatters,
   moveApplicationHistoryToMain,
   moveApplicationHistoryToMatter,
+  moveApplicationHistoryToStakeholderMatter,
 } from "./moveApplicationHistory";
 
 jest.mock("../zohoApi", () => ({ zohoApi: { file: { getAttachments: jest.fn() } } }));
@@ -307,7 +309,7 @@ test.each([null, "", "-None-", "Write-Off"])(
   }
 );
 
-test("retains participant links when moving to another Stakeholder", async () => {
+test("does not retain Contact links when moving to another Stakeholder", async () => {
   const crm = makeCrm({ contacts: ["contact-1", "contact-2"] });
   await moveApplicationHistoryToMain({
     ZOHO: crm.ZOHO,
@@ -316,7 +318,30 @@ test("retains participant links when moving to another Stakeholder", async () =>
     destinationId: "stakeholder-2",
     listAttachments: crm.listAttachments,
   });
-  expect(crm.state.targetContacts).toEqual(["contact-1", "contact-2"]);
+  expect(crm.state.payload.Stakeholder).toEqual({ id: "stakeholder-2" });
+  expect(crm.state.targetContacts).toEqual([]);
+  expect(crm.state.sourceLinks).toEqual([]);
+  expect(crm.api.insertRecord).not.toHaveBeenCalledWith(
+    expect.objectContaining({ Entity: "History_X_Contacts" })
+  );
+  expect(crm.state.deleted).toBe(true);
+});
+
+test("creates Stakeholder History without sending Owner in the insert payload", async () => {
+  const crm = makeCrm({ contacts: [] });
+
+  await moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+  });
+
+  const historyInsert = crm.api.insertRecord.mock.calls
+    .map(([request]) => request)
+    .find((request) => request.Entity === "History1");
+  expect(historyInsert.APIData).not.toHaveProperty("Owner");
 });
 
 test("rolls back if CRM fills the old Matter on the new History record", async () => {
@@ -570,6 +595,7 @@ const makeMatterMoveCrm = ({
   mutateHistoryContentOnMove = false,
   verificationOverride = null,
   verificationOverrideAfterReads = 0,
+  failDeleteLinkId = null,
 } = {}) => {
   const source = {
     id: "application-history-1",
@@ -718,6 +744,9 @@ const makeMatterMoveCrm = ({
     }),
     deleteRecord: jest.fn(async ({ Entity, RecordID }) => {
       if (Entity === "Application_Hstory") {
+        if (String(RecordID) === String(failDeleteLinkId)) {
+          return { data: [{ code: "INVALID_DATA", message: "Contact unlink rejected" }] };
+        }
         state.links = state.links.filter((link) => link.id !== RecordID);
       }
       return success(RecordID);
@@ -1228,6 +1257,100 @@ describe("Application History to another Matter move", () => {
   });
 });
 
+describe("Application History to a Stakeholder Matter move", () => {
+  test("reassigns the History and removes every Contact junction", async () => {
+    const crm = makeMatterMoveCrm({ initialContacts: ["contact-1", "contact-2"] });
+
+    await expect(moveApplicationHistoryToStakeholderMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationStakeholderId: "stakeholder-new",
+      historySummary: {
+        Current_Stage: "5. Document Collection",
+        Matter_Progress: "Documents under review",
+      },
+      delay: async () => {},
+    })).resolves.toMatchObject({
+      sourceId: "application-history-1",
+      targetId: "application-history-1",
+      destination: "stakeholder-matter",
+      matterId: "matter-2",
+      stakeholderId: "stakeholder-new",
+    });
+
+    expect(crm.state.history).toMatchObject({
+      Application: { id: "matter-2" },
+      Matter_No: "2A",
+      Current_Stage: "5. Document Collection",
+      Matter_Progress: "Documents under review",
+      Stakeholder: { id: "stakeholder-new" },
+    });
+    expect(crm.state.links).toEqual([]);
+    expect(crm.api.insertRecord).not.toHaveBeenCalled();
+  });
+
+  test("removes Contact junctions added by a Matter workflow", async () => {
+    const crm = makeMatterMoveCrm({
+      initialContacts: ["contact-1"],
+      workflowAddsDestinationOnMove: true,
+    });
+
+    await moveApplicationHistoryToStakeholderMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationStakeholderId: "stakeholder-new",
+      delay: async () => {},
+    });
+
+    expect(crm.state.links).toEqual([]);
+    expect(crm.api.insertRecord).not.toHaveBeenCalled();
+  });
+
+  test("rejects a Matter that no longer belongs to the selected Stakeholder", async () => {
+    const crm = makeMatterMoveCrm({
+      matterOverrides: {
+        Stakeholder_Auto: { id: "stakeholder-other", name: "Other Stakeholder" },
+      },
+    });
+
+    await expect(moveApplicationHistoryToStakeholderMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationStakeholderId: "stakeholder-new",
+      delay: async () => {},
+    })).rejects.toThrow("no longer associated with this Stakeholder");
+
+    expect(crm.api.updateRecord).not.toHaveBeenCalled();
+    expect(crm.api.deleteRecord).not.toHaveBeenCalled();
+  });
+
+  test("restores the original Matter and Contact junctions when unlinking fails", async () => {
+    const crm = makeMatterMoveCrm({
+      initialContacts: ["contact-1", "contact-2"],
+      failDeleteLinkId: "application-link-2",
+    });
+
+    await expect(moveApplicationHistoryToStakeholderMatter({
+      ZOHO: crm.ZOHO,
+      sourceId: "application-history-1",
+      destinationMatterId: "matter-2",
+      destinationStakeholderId: "stakeholder-new",
+      delay: async () => {},
+    })).rejects.toThrow("History remains on its original Matter");
+
+    expect(crm.state.history).toMatchObject({
+      Application: { id: "matter-1" },
+      Matter_No: "1",
+      Stakeholder: { id: "stakeholder-old" },
+    });
+    expect(crm.state.links.map((link) => link.Contact.id).sort())
+      .toEqual(["contact-1", "contact-2"]);
+  });
+});
+
 describe("Contact Matter lookup", () => {
   test("loads all pages, removes duplicates and excludes the current Matter", async () => {
     const getRelatedRecords = jest
@@ -1257,6 +1380,43 @@ describe("Contact Matter lookup", () => {
     expect(getRelatedRecords).toHaveBeenCalledWith(expect.objectContaining({
       Entity: "Contacts",
       RecordID: "contact-2",
+      RelatedList: "Applications",
+      page: 1,
+      per_page: 200,
+    }));
+  });
+});
+
+describe("Stakeholder Matter lookup", () => {
+  test("loads every related Matter page from the selected Account", async () => {
+    const getRelatedRecords = jest
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          { id: "matter-2", Name: "10" },
+          { id: "matter-1", Name: "1" },
+        ],
+        info: { more_records: true },
+      })
+      .mockResolvedValueOnce({
+        data: [
+          { id: "matter-2", Name: "10" },
+          { id: "matter-3", Name: "2" },
+        ],
+        info: { more_records: false },
+      });
+
+    const matters = await fetchStakeholderMatters({
+      ZOHO: { CRM: { API: { getRelatedRecords } } },
+      stakeholderId: "stakeholder-2",
+      excludeMatterId: "matter-1",
+    });
+
+    expect(matters.map((matter) => matter.id)).toEqual(["matter-3", "matter-2"]);
+    expect(getRelatedRecords).toHaveBeenCalledTimes(2);
+    expect(getRelatedRecords).toHaveBeenCalledWith(expect.objectContaining({
+      Entity: "Accounts",
+      RecordID: "stakeholder-2",
       RelatedList: "Applications",
       page: 1,
       per_page: 200,

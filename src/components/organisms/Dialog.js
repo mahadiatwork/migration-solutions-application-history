@@ -897,6 +897,18 @@ export function Dialog({
 
   }
 
+  const moveHistorySummary = buildApplicationHistoryMoveSummary(
+    formData,
+    progressFieldType,
+    moveSummaryFields
+  );
+  const moveSourceMatterId =
+    sourceMatterId ||
+    (isMatterContext ? currentModuleData?.id : null) ||
+    selectedRowData?.Application?.id ||
+    selectedRowData?.historyDetails?.Application?.id ||
+    null;
+
   return (
     <>
       <MUIDialog
@@ -1518,19 +1530,9 @@ export function Dialog({
         contacts={contacts}
         ZOHO={ZOHO}
         selectedRowData={selectedRowData}
-        historySummary={buildApplicationHistoryMoveSummary(
-          formData,
-          progressFieldType,
-          moveSummaryFields
-        )}
+        historySummary={moveHistorySummary}
         matterSummaryReady={!isMatterLoading && !matterLoadError}
-        sourceMatterId={
-          sourceMatterId ||
-          (isMatterContext ? currentModuleData?.id : null) ||
-          selectedRowData?.Application?.id ||
-          selectedRowData?.historyDetails?.Application?.id ||
-          null
-        }
+        sourceMatterId={moveSourceMatterId}
         onRecordMoved={(movedId) => {
           if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
         }}
@@ -1541,6 +1543,9 @@ export function Dialog({
         ZOHO={ZOHO}
         selectedRowData={selectedRowData}
         suggestedStakeholder={formData.stakeHolder}
+        historySummary={moveHistorySummary}
+        matterSummaryReady={!isMatterLoading && !matterLoadError}
+        sourceMatterId={moveSourceMatterId}
         onRecordMoved={(movedId) => {
           if (handleCloseDialog) handleCloseDialog({ deleted: true, id: movedId });
         }}
