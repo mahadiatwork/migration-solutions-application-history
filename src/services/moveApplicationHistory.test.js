@@ -23,12 +23,13 @@ const makeCrm = ({
   failSourceJunctionDelete = false,
   ambiguousSourceDelete = false,
   sourceBillingType = "Non-Billable",
+  sourceDetails = "Original details",
   targetLinkStakeholder,
 } = {}) => {
   const source = {
     id: "application-history-1",
     Name: "Original History",
-    History_Details: "Original details",
+    History_Details: sourceDetails,
     History_Result: "Meeting Held",
     History_Type: "Meeting",
     Regarding: "Consultation",
@@ -191,6 +192,73 @@ test("moves directly to Stakeholder History without requiring a Contact", async 
   expect(crm.state.targetContacts).toEqual([]);
   expect(crm.state.deleted).toBe(true);
   expect(crm.ZOHO.CRM.FUNCTIONS.execute).not.toHaveBeenCalled();
+});
+
+test("accepts Zoho newline normalization in a new Stakeholder History", async () => {
+  const crm = makeCrm({
+    contacts: [],
+    sourceDetails: "First line\r\nSecond line",
+    targetOverride: { History_Details_Plain: "First line\nSecond line" },
+  });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+    delay: async () => {},
+  })).resolves.toMatchObject({ targetId: "main-history-1" });
+  expect(crm.state.deleted).toBe(true);
+});
+
+test("retries a temporarily incomplete new History readback", async () => {
+  const crm = makeCrm({ contacts: [] });
+  const getRecord = crm.api.getRecord.getMockImplementation();
+  let targetReads = 0;
+  crm.api.getRecord.mockImplementation(async (request) => {
+    const response = await getRecord(request);
+    if (request.Entity === "History1" && targetReads++ === 0) {
+      return {
+        data: [{ ...response.data[0], History_Details_Plain: "" }],
+      };
+    }
+    return response;
+  });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+    delay: async () => {},
+  })).resolves.toMatchObject({ targetId: "main-history-1" });
+  expect(targetReads).toBe(2);
+  expect(crm.state.deleted).toBe(true);
+});
+
+test("retries when the new History is not immediately readable", async () => {
+  const crm = makeCrm({ contacts: [] });
+  const getRecord = crm.api.getRecord.getMockImplementation();
+  let targetReads = 0;
+  crm.api.getRecord.mockImplementation(async (request) => {
+    if (request.Entity === "History1" && targetReads++ === 0) {
+      throw new Error("History is not indexed yet");
+    }
+    return getRecord(request);
+  });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+    delay: async () => {},
+  })).resolves.toMatchObject({ targetId: "main-history-1" });
+  expect(targetReads).toBe(2);
+  expect(crm.state.deleted).toBe(true);
 });
 
 test.each([

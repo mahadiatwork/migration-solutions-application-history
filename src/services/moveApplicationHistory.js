@@ -10,6 +10,7 @@ const MATTER_CONTACT_LIST = "Applications";
 const APPLICATION_HISTORY_CONTACT_MODULE = "Application_Hstory";
 const PAGE_SIZE = 200;
 const ATTACHMENT_CHECK_DELAYS_MS = [0, 250, 750, 1500];
+const TARGET_CHECK_DELAYS_MS = [0, 250, 750, 1500];
 
 const recordId = (value) => value?.id ?? value?.Id ?? value?.ID ?? null;
 
@@ -120,6 +121,11 @@ const attachmentsMatch = (source, target) => {
 const sameValue = (expected, actual) =>
   String(expected ?? "") === String(actual ?? "");
 
+const normalizeZohoText = (value, { trim = false } = {}) => {
+  const normalized = String(value ?? "").replace(/\r\n?/g, "\n");
+  return trim ? normalized.trim() : normalized;
+};
+
 const sameDate = (expected, actual) => {
   if (!expected && !actual) return true;
   const expectedTime = Date.parse(expected);
@@ -170,7 +176,10 @@ const assertTarget = (target, payload, destination, destinationId) => {
   if (payload.Owner && String(recordId(target.Owner)) !== String(recordId(payload.Owner))) {
     throw new Error("The new History record has a different owner.");
   }
-  if (payload.History_Details_Plain !== (target.History_Details_Plain ?? "")) {
+  if (
+    normalizeZohoText(payload.History_Details_Plain) !==
+    normalizeZohoText(target.History_Details_Plain)
+  ) {
     throw new Error("The new History record is missing its details.");
   }
   for (const field of ["Name", "History_Type", "History_Result", "Regarding", "Duration"]) {
@@ -192,6 +201,34 @@ const assertTarget = (target, payload, destination, destinationId) => {
   }
 };
 
+const assertTargetWithRetry = async (
+  api,
+  targetId,
+  payload,
+  destination,
+  destinationId,
+  delay
+) => {
+  let lastError;
+  for (const waitMs of TARGET_CHECK_DELAYS_MS) {
+    if (waitMs) await delay(waitMs);
+    let target = null;
+    try {
+      target = await readRecord(api, TARGET_MODULE, targetId);
+      assertTarget(target, payload, destination, destinationId);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!target) continue;
+      const detailsArePending =
+        normalizeZohoText(payload.History_Details_Plain) !== "" &&
+        normalizeZohoText(target.History_Details_Plain) === "";
+      if (!detailsArePending) throw error;
+    }
+  }
+  throw lastError;
+};
+
 export class HistoryMoveError extends Error {
   constructor(message, sourceId, targetId = null, sourceDeleted = false, rolledBack = false) {
     super(message);
@@ -211,6 +248,8 @@ export async function moveApplicationHistoryToMain({
   destinationId,
   destinationName,
   listAttachments = zohoApi.file.getAttachments,
+  delay = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
 }) {
   if (!sourceId || !destinationId || !["contact", "stakeholder"].includes(destination)) {
     throw new Error("Select a valid History destination.");
@@ -249,7 +288,14 @@ export async function moveApplicationHistoryToMain({
     targetId = recordId(created.details);
     if (!targetId) throw new Error("CRM did not return the new History record ID.");
 
-    assertTarget(await readRecord(api, TARGET_MODULE, targetId), payload, destination, destinationId);
+    await assertTargetWithRetry(
+      api,
+      targetId,
+      payload,
+      destination,
+      destinationId,
+      delay
+    );
 
     for (const contactId of contactIds) {
       const link = successItem(await api.insertRecord({
@@ -393,11 +439,6 @@ const normalizeMatterValue = (value) => {
     normalized = canonicalizeMatterPicklistValue(first);
   }
   return normalized === "-None-" ? "" : normalized;
-};
-
-const normalizeZohoText = (value, { trim = false } = {}) => {
-  const normalized = String(value ?? "").replace(/\r\n?/g, "\n");
-  return trim ? normalized.trim() : normalized;
 };
 
 const normalizeZohoValue = (value) => {
