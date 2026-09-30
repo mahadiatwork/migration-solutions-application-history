@@ -56,7 +56,7 @@ export const matterSummaryForEdit = (matter, history) => {
   const savedProgress = normalizeSingleValue(history?.[fields.matterProgress]);
   const hasSavedSummary = hasSavedMatterSummary(history);
   return {
-    matterNo: source.matterNo || normalizeSingleValue(history?.[fields.matterNo]),
+    matterNo: normalizeSingleValue(history?.[fields.matterNo]) || source.matterNo,
     currentStage: hasSavedSummary ? savedStage : source.currentStage,
     matterProgress: hasSavedSummary ? savedProgress : source.matterProgress,
     billingType:

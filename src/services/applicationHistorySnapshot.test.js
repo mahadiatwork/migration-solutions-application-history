@@ -24,20 +24,26 @@ describe("Application History Matter summary", () => {
     });
   });
 
-  test("editing preserves saved overrides and keeps the Matter number read only", () => {
-    expect(
-      matterSummaryForEdit(matter, {
-        Matter_No: "old number",
+  test("editing preserves the saved historical Matter number", () => {
+    const displayedSummary = matterSummaryForEdit(
+      { ...matter, Name: "A12" },
+      {
+        Matter_No: "BB1",
         Current_Stage: "3. Preparation",
         Matter_Progress: ["Drafting"],
         Billing_Type: "Write-Off",
-      })
-    ).toEqual({
-      matterNo: "MAT-1001",
+      }
+    );
+
+    expect(displayedSummary).toEqual({
+      matterNo: "BB1",
       currentStage: "3. Preparation",
       matterProgress: "Drafting",
       billingType: "Write-Off",
     });
+    expect(
+      buildApplicationHistorySummary(displayedSummary, "multiselectpicklist")
+    ).toMatchObject({ Matter_No: "BB1" });
   });
 
   test("editing preserves an explicitly cleared Stage and Progress", () => {
