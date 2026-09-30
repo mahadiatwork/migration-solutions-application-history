@@ -1281,7 +1281,7 @@ describe("Application History to a Stakeholder Matter move", () => {
 
     expect(crm.state.history).toMatchObject({
       Application: { id: "matter-2" },
-      Matter_No: "2A",
+      Matter_No: "1",
       Current_Stage: "5. Document Collection",
       Matter_Progress: "Documents under review",
       Stakeholder: { id: "stakeholder-new" },

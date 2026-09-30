@@ -1196,6 +1196,7 @@ export async function moveApplicationHistoryToStakeholderMatter({
   };
   const payload = {
     ...buildMatterMovePayload(sourceWithVisibleSummary, matter, null),
+    Matter_No: source.Matter_No ?? null,
     Stakeholder: { id: String(destinationStakeholderId) },
   };
   const rollbackPayload = originalMatterPayload(source);
