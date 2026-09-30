@@ -23,6 +23,42 @@ describe("picklistConfigService authoritative module behavior", () => {
     delete window.ZOHO;
   });
 
+  test("orders every category by numeric priority, preserving zero and placing missing ranks last", async () => {
+    const rankedOptions = [
+      ["Unranked", null],
+      ["Meeting", "10"],
+      ["Fruit", "9"],
+      ["Other", 5],
+      ["First", 0],
+      ["Wrapped", { actual_value: "2", display_value: "second" }],
+      ["High", 12000],
+      ["Blank", " "],
+      ["Invalid", "not a number"],
+      ["Infinite", Infinity],
+      ["Boolean", true],
+      ["Array", []],
+      ["Same priority", 9],
+    ];
+    const data = ["Type", "Result", "Regarding"].flatMap((Category) =>
+      rankedOptions.map(([Name, Sort_Order]) => ({
+        Name, Category, Sort_Order, Parent_Type: "Fruit", Active: true,
+      }))
+    );
+    data.push(...[["60", 0], ["0", 9], ["15", 5]].map(([Name, Sort_Order]) => ({
+      Name, Category: "Duration", Sort_Order, Active: true,
+    })));
+    const service = loadService(jest.fn().mockResolvedValue({ data }));
+
+    const config = await service.fetchPicklistConfig();
+
+    const expected = ["First", "Wrapped", "Other", "Fruit", "Same priority", "Meeting", "High", "Unranked", "Blank", "Invalid", "Infinite", "Boolean", "Array"];
+    expect(service.getTypeOptionsFromConfig(config)).toEqual(expected);
+    expect(config.results.Fruit).toEqual(expected);
+    expect(config.regarding.Fruit).toEqual(expected);
+    expect(service.getDurationOptionsFromConfig(config)).toEqual([60, 15, 0]);
+    expect(config.resultMapping.Fruit).toBe("First");
+  });
+
   test("accepts History Type and History Result category aliases", async () => {
     const getAllRecords = jest.fn().mockResolvedValue({
       data: [

@@ -454,6 +454,20 @@ const _pushUnique = (list, value) => {
   if (value && !list.includes(value)) list.push(value);
 };
 
+const sortRank = (value) => {
+  const rawValue = value && typeof value === "object"
+    ? value.actual_value ?? value.display_value ?? value.name ?? value.Name
+    : value;
+  if (
+    (typeof rawValue !== "number" && typeof rawValue !== "string") ||
+    (typeof rawValue === "string" && rawValue.trim() === "")
+  ) {
+    return Infinity;
+  }
+  const rank = Number(rawValue);
+  return Number.isFinite(rank) ? rank : Infinity;
+};
+
 const _groupRecords = (records) => {
   const { name, category, parentType, sortOrder } = PICKLIST_CONFIG_FIELDS;
   const { TYPE, RESULT, REGARDING, DURATION } = PICKLIST_CATEGORIES;
@@ -464,7 +478,7 @@ const _groupRecords = (records) => {
   const durations = [];
 
   const sorted = [...records].sort(
-    (a, b) => (Number(a[sortOrder]) || 9999) - (Number(b[sortOrder]) || 9999)
+    (a, b) => sortRank(a[sortOrder]) - sortRank(b[sortOrder])
   );
 
   for (const record of sorted) {

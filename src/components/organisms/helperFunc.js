@@ -109,21 +109,18 @@ export const resolveModuleStakeholder = (moduleData) => {
   };
 };
 
-export const getRegardingOptions = (type, existingValue, config) => {
+export const getRegardingOptions = (type, existingValue, config, category) => {
   if (config?._source === "custom_module") {
     const configuredRegarding = config.regarding || {};
-    const source = Object.prototype.hasOwnProperty.call(
-      configuredRegarding,
-      type
-    )
-      ? (Array.isArray(configuredRegarding[type])
-        ? configuredRegarding[type]
-        : [])
-      : Object.prototype.hasOwnProperty.call(configuredRegarding, "_default")
-        ? (Array.isArray(configuredRegarding._default)
-          ? configuredRegarding._default
-          : [])
-        : [];
+    // Activity Type mappings take precedence; shared History Type mappings
+    // also apply when no activity-specific mapping exists.
+    const parent = [type, category, "_default"].find(
+      (candidate) => candidate != null &&
+        Object.prototype.hasOwnProperty.call(configuredRegarding, candidate)
+    );
+    const source = Array.isArray(configuredRegarding[parent])
+      ? configuredRegarding[parent]
+      : [];
     return removeReservedRegardingValues(
       mergeOrderedUnique(source, [existingValue])
     );

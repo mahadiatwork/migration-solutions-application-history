@@ -1047,7 +1047,8 @@ export function Dialog({
                       getRegardingOptions(
                         nextResult,
                         undefined,
-                        picklistConfig
+                        picklistConfig,
+                        type
                       )[0] || ""
                     );
                   }}
@@ -1084,7 +1085,8 @@ export function Dialog({
                       getRegardingOptions(
                         selectedResult,
                         undefined,
-                        picklistConfig
+                        picklistConfig,
+                        formData.type
                       )[0] || ""
                     );
                   }}

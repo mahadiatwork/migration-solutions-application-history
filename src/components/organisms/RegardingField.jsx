@@ -8,15 +8,15 @@ import {
 const RegardingField = ({ formData, handleInputChange, selectedRowData, picklistConfig }) => {
   const existingValue = formData?.regarding ?? selectedRowData?.regarding ?? "";
   const configuredOptions = React.useMemo(
-    () => getRegardingOptions(formData?.result, undefined, picklistConfig),
-    [formData?.result, picklistConfig]
+    () => getRegardingOptions(formData?.result, undefined, picklistConfig, formData?.type),
+    [formData?.result, formData?.type, picklistConfig]
   );
 
   const [selectedValue, setSelectedValue] = useState("");
   const [manualInput, setManualInput] = useState("");
   const [showManualInput, setShowManualInput] = useState(false);
   const optionSetKey = configuredOptions.join("\u0000");
-  const contextKey = `${selectedRowData?.id ?? "new"}:${formData?.result ?? ""}:${optionSetKey}`;
+  const contextKey = `${selectedRowData?.id ?? "new"}:${formData?.type ?? ""}:${formData?.result ?? ""}:${optionSetKey}`;
   const previousContext = useRef(contextKey);
 
   useEffect(() => {

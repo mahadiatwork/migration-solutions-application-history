@@ -32,6 +32,49 @@ describe("RegardingField", () => {
     expect(screen.queryByRole("option", { name: "Meeting agenda" })).toBeNull();
   });
 
+  test("shows ordered Fruit Regarding options when only the Category has a mapping", () => {
+    render(
+      <RegardingField
+        formData={{ type: "Fruit", result: "Apple", regarding: "Pear" }}
+        handleInputChange={jest.fn()}
+        selectedRowData={{ id: "history-fruit", regarding: "Pear" }}
+        picklistConfig={{
+          _source: "custom_module",
+          regarding: { Fruit: ["Pear", "Peach"], _default: ["General"] },
+        }}
+      />
+    );
+
+    expect(screen.queryByLabelText("Custom Regarding")).toBeNull();
+    expect(screen.getByRole("combobox").textContent).toContain("Pear");
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Pear", "Peach", "Custom",
+    ]);
+  });
+
+  test.each([
+    { activityOptions: ["Activity-specific"] },
+    { activityOptions: [] },
+  ])("preserves an explicit Activity Type mapping: $activityOptions", ({ activityOptions }) => {
+    render(
+      <RegardingField
+        formData={{ type: "Fruit", result: "Apple", regarding: "" }}
+        handleInputChange={jest.fn()}
+        selectedRowData={null}
+        picklistConfig={{
+          _source: "custom_module",
+          regarding: { Apple: activityOptions, Fruit: ["Pear"] },
+        }}
+      />
+    );
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      ...activityOptions, "Custom",
+    ]);
+    expect(screen.queryByRole("option", { name: "Pear" })).toBeNull();
+  });
+
   test("refreshes options when Activity Type changes", () => {
     const props = {
       handleInputChange: jest.fn(),
