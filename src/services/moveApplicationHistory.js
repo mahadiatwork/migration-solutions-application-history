@@ -59,6 +59,24 @@ const createMainHistory = async (ZOHO, payload) => {
   return body;
 };
 
+const readMainHistory = async (ZOHO, id) => {
+  const response = await ZOHO.CRM.CONNECTION.invoke(conn_name, {
+    url: `${dataCenterMap.AU}/crm/v8/${TARGET_MODULE}/${id}?approved=both`,
+    method: "GET",
+    param_type: 1,
+  });
+  const statusCode = Number(response?.details?.statusCode ?? response?.statusCode ?? 0);
+  const body = unwrapConnectionResponse(response);
+  if (statusCode >= 400) {
+    throw new Error(body?.data?.[0]?.message || body?.message || `Zoho CRM request failed (${statusCode}).`);
+  }
+  const record = body?.data?.[0];
+  if (!record?.id || String(record.id) !== String(id)) {
+    throw new Error(`Could not verify ${TARGET_MODULE} record ${id}.`);
+  }
+  return record;
+};
+
 const recordId = (value) => value?.id ?? value?.Id ?? value?.ID ?? null;
 
 const successItem = (response, action) => {
@@ -259,7 +277,7 @@ const assertTarget = (target, payload, destination, destinationId) => {
 };
 
 const assertTargetWithRetry = async (
-  api,
+  ZOHO,
   targetId,
   payload,
   destination,
@@ -271,7 +289,9 @@ const assertTargetWithRetry = async (
     if (waitMs) await delay(waitMs);
     let target = null;
     try {
-      target = await readRecord(api, TARGET_MODULE, targetId);
+      // Read through the same CRM connection used to create the record. The
+      // embedded record API can omit long-text fields on this custom module.
+      target = await readMainHistory(ZOHO, targetId);
       assertTarget(target, payload, destination, destinationId);
       return;
     } catch (error) {
@@ -346,7 +366,7 @@ export async function moveApplicationHistoryToMain({
     if (!targetId) throw new Error("CRM did not return the new History record ID.");
 
     await assertTargetWithRetry(
-      api,
+      ZOHO,
       targetId,
       payload,
       destination,

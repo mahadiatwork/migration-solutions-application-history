@@ -124,6 +124,18 @@ const makeCrm = ({
       state.payload = request.parameters.data[0];
       return connectionSuccess(success("main-history-1"));
     }
+    if (request.method === "GET" && request.url.includes("/History1/main-history-1?")) {
+      const target = {
+        id: "main-history-1",
+        ...state.payload,
+        Matter: targetMatter,
+        ...targetOverride,
+      };
+      if (!Object.prototype.hasOwnProperty.call(targetOverride, "Billing_Type")) {
+        delete target.Billing_Type;
+      }
+      return connectionSuccess({ data: [target] });
+    }
     return connectionSuccess(success("connection-record"));
   });
   const ZOHO = {
@@ -197,6 +209,37 @@ test("moves to Contact History with no Matter fields and all intended Contacts",
   }));
 });
 
+test("verifies new Contact History details through the CRM connection readback", async () => {
+  const crm = makeCrm({ contacts: [], attachments: [] });
+  const getRecord = crm.api.getRecord.getMockImplementation();
+  crm.api.getRecord.mockImplementation(async (request) => {
+    if (request.Entity === "History1") {
+      return { data: [{ id: "main-history-1", History_Details_Plain: "" }] };
+    }
+    return getRecord(request);
+  });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "contact",
+    destinationId: "contact-2",
+    listAttachments: crm.listAttachments,
+    delay: async () => {},
+  })).resolves.toMatchObject({ targetId: "main-history-1", destination: "contact" });
+
+  expect(crm.api.getRecord.mock.calls.some(([request]) => request.Entity === "History1")).toBe(false);
+  expect(crm.ZOHO.CRM.CONNECTION.invoke).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({
+      method: "GET",
+      url: expect.stringContaining("/crm/v8/History1/main-history-1?approved=both"),
+      param_type: 1,
+    })
+  );
+  expect(crm.state.deleted).toBe(true);
+});
+
 test("moves directly to Stakeholder History without requiring a Contact", async () => {
   const crm = makeCrm({ contacts: [] });
   await moveApplicationHistoryToMain({
@@ -252,14 +295,16 @@ test("accepts harmless imported-email whitespace normalization in a new Stakehol
 
 test("retries a temporarily incomplete new History readback", async () => {
   const crm = makeCrm({ contacts: [] });
-  const getRecord = crm.api.getRecord.getMockImplementation();
+  const invoke = crm.ZOHO.CRM.CONNECTION.invoke.getMockImplementation();
   let targetReads = 0;
-  crm.api.getRecord.mockImplementation(async (request) => {
-    const response = await getRecord(request);
-    if (request.Entity === "History1" && targetReads++ === 0) {
-      return {
-        data: [{ ...response.data[0], History_Details_Plain: "" }],
-      };
+  crm.ZOHO.CRM.CONNECTION.invoke.mockImplementation(async (...args) => {
+    const request = args[1];
+    const response = await invoke(...args);
+    if (request.method === "GET" && request.url.includes("/History1/main-history-1?") && targetReads++ === 0) {
+      const body = JSON.parse(response.details.statusMessage);
+      return connectionSuccess({
+        data: [{ ...body.data[0], History_Details_Plain: "" }],
+      });
     }
     return response;
   });
@@ -278,13 +323,14 @@ test("retries a temporarily incomplete new History readback", async () => {
 
 test("retries when the new History is not immediately readable", async () => {
   const crm = makeCrm({ contacts: [] });
-  const getRecord = crm.api.getRecord.getMockImplementation();
+  const invoke = crm.ZOHO.CRM.CONNECTION.invoke.getMockImplementation();
   let targetReads = 0;
-  crm.api.getRecord.mockImplementation(async (request) => {
-    if (request.Entity === "History1" && targetReads++ === 0) {
+  crm.ZOHO.CRM.CONNECTION.invoke.mockImplementation(async (...args) => {
+    const request = args[1];
+    if (request.method === "GET" && request.url.includes("/History1/main-history-1?") && targetReads++ === 0) {
       throw new Error("History is not indexed yet");
     }
-    return getRecord(request);
+    return invoke(...args);
   });
 
   await expect(moveApplicationHistoryToMain({
