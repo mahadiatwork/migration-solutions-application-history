@@ -1,5 +1,6 @@
 import { zohoApi } from "../zohoApi";
 import { canonicalizeMatterPicklistValue } from "./matterPicklistValues";
+import { conn_name, dataCenterMap } from "../config/config";
 
 const SOURCE_MODULE = "Applications_History";
 const TARGET_MODULE = "History1";
@@ -12,6 +13,51 @@ const APPLICATION_HISTORY_CONTACT_MODULE = "Application_Hstory";
 const PAGE_SIZE = 200;
 const ATTACHMENT_CHECK_DELAYS_MS = [0, 250, 750, 1500];
 const TARGET_CHECK_DELAYS_MS = [0, 250, 750, 1500];
+
+const assertProductionCrmContext = () => {
+  const ancestors = typeof window !== "undefined"
+    ? window.location?.ancestorOrigins
+    : null;
+  const referrer = typeof document !== "undefined" ? document.referrer : "";
+  const parentUrl = ancestors?.length
+    ? ancestors[ancestors.length - 1]
+    : referrer;
+  let host;
+  try {
+    host = new URL(parentUrl).hostname.toLowerCase();
+  } catch {
+    throw new Error("Could not confirm the active Zoho CRM environment; the move was cancelled.");
+  }
+  if (host.includes("sandbox")) {
+    throw new Error("Moving history from a Zoho CRM Sandbox is disabled for this production connection.");
+  }
+};
+
+const unwrapConnectionResponse = (response) => {
+  const statusMessage = response?.details?.statusMessage;
+  if (typeof statusMessage === "string") {
+    try { return JSON.parse(statusMessage); } catch { /* Fall through to other response shapes. */ }
+  }
+  if (statusMessage && typeof statusMessage === "object") return statusMessage;
+  return response?.details?.data ? response.details : response;
+};
+
+const createMainHistory = async (ZOHO, payload) => {
+  assertProductionCrmContext();
+  const response = await ZOHO.CRM.CONNECTION.invoke(conn_name, {
+    url: `${dataCenterMap.AU}/crm/v8/${TARGET_MODULE}`,
+    method: "POST",
+    param_type: 2,
+    headers: { "Content-Type": "application/json" },
+    parameters: { data: [payload], trigger: ["workflow"] },
+  });
+  const statusCode = Number(response?.details?.statusCode ?? response?.statusCode ?? 0);
+  const body = unwrapConnectionResponse(response);
+  if (statusCode >= 400) {
+    throw new Error(body?.data?.[0]?.message || body?.message || `Zoho CRM request failed (${statusCode}).`);
+  }
+  return body;
+};
 
 const recordId = (value) => value?.id ?? value?.Id ?? value?.ID ?? null;
 
@@ -292,11 +338,10 @@ export async function moveApplicationHistoryToMain({
     if (destination === "contact") contactIds.add(String(destinationId));
 
     const payload = buildHistoryPayload(source, destination, destinationId, destinationName);
-    const created = successItem(await api.insertRecord({
-      Entity: TARGET_MODULE,
-      APIData: payload,
-      Trigger: ["workflow"],
-    }), "Create main History");
+    const created = successItem(
+      await createMainHistory(ZOHO, payload),
+      "Create main History"
+    );
     targetId = recordId(created.details);
     if (!targetId) throw new Error("CRM did not return the new History record ID.");
 

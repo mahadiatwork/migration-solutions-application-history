@@ -10,6 +10,9 @@ import {
 jest.mock("../zohoApi", () => ({ zohoApi: { file: { getAttachments: jest.fn() } } }));
 
 const success = (id) => ({ data: [{ code: "SUCCESS", details: { id } }] });
+const connectionSuccess = (body) => ({
+  details: { statusMessage: JSON.stringify(body) },
+});
 
 const makeCrm = ({
   contacts = ["contact-1"],
@@ -116,9 +119,17 @@ const makeCrm = ({
       return success("deleted");
     }),
   };
+  const invoke = jest.fn(async (_connection, request) => {
+    if (request.method === "POST" && request.url.endsWith("/History1")) {
+      state.payload = request.parameters.data[0];
+      return connectionSuccess(success("main-history-1"));
+    }
+    return connectionSuccess(success("connection-record"));
+  });
   const ZOHO = {
     CRM: {
       API: api,
+      CONNECTION: { invoke },
       FUNCTIONS: {
         execute: jest.fn(async () => {
           if (failCopy) throw new Error("Copy function failed");
@@ -134,6 +145,13 @@ const makeCrm = ({
   }));
   return { ZOHO, api, state, listAttachments };
 };
+
+beforeEach(() => {
+  Object.defineProperty(document, "referrer", {
+    configurable: true,
+    value: "https://crm.zoho.com.au/",
+  });
+});
 
 test("moves to Contact History with no Matter fields and all intended Contacts", async () => {
   const crm = makeCrm({ contacts: ["contact-1"], attachments: [{ File_Name: "letter.pdf" }] });
@@ -345,7 +363,7 @@ test("does not retain Contact links when moving to another Stakeholder", async (
   expect(crm.state.deleted).toBe(true);
 });
 
-test("creates Stakeholder History without sending Owner in the insert payload", async () => {
+test("creates Stakeholder History without sending Owner in the JSON payload", async () => {
   const crm = makeCrm({ contacts: [] });
 
   await moveApplicationHistoryToMain({
@@ -356,10 +374,48 @@ test("creates Stakeholder History without sending Owner in the insert payload", 
     listAttachments: crm.listAttachments,
   });
 
-  const historyInsert = crm.api.insertRecord.mock.calls
-    .map(([request]) => request)
-    .find((request) => request.Entity === "History1");
-  expect(historyInsert.APIData).not.toHaveProperty("Owner");
+  const historyInsert = crm.ZOHO.CRM.CONNECTION.invoke.mock.calls
+    .map(([, request]) => request)
+    .find((request) => request.method === "POST" && request.url.endsWith("/History1"));
+  expect(historyInsert.parameters.data[0]).not.toHaveProperty("Owner");
+  expect(historyInsert.headers["Content-Type"]).toBe("application/json");
+});
+
+test("preserves imported SharePoint URL encoding when moving Matter History to Contact History", async () => {
+  const sharePointUrl = "https://example.sharepoint.com/sites/archive/Shared%20Documents/Email%20Attachment.msg";
+  const crm = makeCrm({ contacts: [], sourceDetails: sharePointUrl });
+
+  await moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+  });
+
+  expect(crm.state.payload.History_Details_Plain).toBe(sharePointUrl);
+  const [, request] = crm.ZOHO.CRM.CONNECTION.invoke.mock.calls.find(
+    ([, call]) => call.method === "POST" && call.url.endsWith("/History1")
+  );
+  expect(request.headers["Content-Type"]).toBe("application/json");
+});
+
+test("does not use the production connection from a Zoho CRM Sandbox", async () => {
+  Object.defineProperty(document, "referrer", {
+    configurable: true,
+    value: "https://crmsandbox.zoho.com/",
+  });
+  const crm = makeCrm({ contacts: [] });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+  })).rejects.toThrow("Sandbox");
+  expect(crm.ZOHO.CRM.CONNECTION.invoke).not.toHaveBeenCalled();
+  expect(crm.api.deleteRecord).not.toHaveBeenCalled();
 });
 
 test("rolls back if CRM fills the old Matter on the new History record", async () => {
