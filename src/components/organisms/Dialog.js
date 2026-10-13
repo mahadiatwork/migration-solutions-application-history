@@ -1486,7 +1486,7 @@ export function Dialog({
                     padding: "4px 8px",
                   }}
                 >
-                  Move to Application
+                  Move to Matter
                 </Button>
               )}
             </div>
@@ -1520,11 +1520,13 @@ export function Dialog({
         handleApplicationDialogClose={handleApplicationDialogClose}
         applications={applications}
         ZOHO={ZOHO}
-        handleDelete={handleDelete}
-        formData={formData}
-        historyContacts={historyContacts}
         selectedRowData={selectedRowData}
-        currentContact={currentContact}
+        currentContact={currentContact || currentModuleData}
+        historySummary={moveHistorySummary}
+        sourceMatterId={moveSourceMatterId}
+        onRecordMoved={() => {
+          if (handleCloseDialog) handleCloseDialog();
+        }}
       />
       <ContactDialog
         openContactDialog={openContactDialog}

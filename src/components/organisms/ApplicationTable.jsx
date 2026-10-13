@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { moveApplicationHistoryToMatter } from "../../services/moveApplicationHistory";
 import {
   Table,
   TableBody,
@@ -21,7 +22,7 @@ const ApplicationTable = ({
   applications,
   selectedApplicationId,
   setSelectedApplicationId,
-  currentContact,
+  sourceMatterId,
 }) => {
   const handleRowSelect = (id) => {
     setSelectedApplicationId(id);
@@ -54,12 +55,13 @@ const ApplicationTable = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {applications.map((app) => (
+          {(Array.isArray(applications) ? applications : []).map((app) => (
             <TableRow key={app.id}>
               <TableCell>
                 <Radio
                   checked={selectedApplicationId === app.id}
                   onChange={() => handleRowSelect(app.id)}
+                  disabled={String(app.id) === String(sourceMatterId)}
                   sx={{ padding: "4px" }} // Reduce padding
                 />
               </TableCell>
@@ -87,11 +89,11 @@ const ApplicationDialog = ({
   handleApplicationDialogClose,
   applications,
   ZOHO,
-  handleDelete,
-  formData,
-  historyContacts,
   selectedRowData,
   currentContact,
+  historySummary,
+  sourceMatterId,
+  onRecordMoved,
 }) => {
   const [selectedApplicationId, setSelectedApplicationId] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
@@ -105,10 +107,12 @@ const ApplicationDialog = ({
     setSnackbar({ open: false, message: "", severity: "success" });
   };
 
-  const handleApplicationSelect = async () => {
-    // console.log({ selectedRowData });
-    // return;
+  useEffect(() => {
+    if (openApplicationDialog) setSelectedApplicationId(null);
+  }, [openApplicationDialog]);
 
+  const handleApplicationSelect = async () => {
+    if (isMoving) return;
     if (!selectedApplicationId) {
       setSnackbar({
         open: true,
@@ -117,78 +121,48 @@ const ApplicationDialog = ({
       });
       return;
     }
+    if (!selectedRowData?.id || !currentContact?.id) {
+      setSnackbar({
+        open: true,
+        message: "The History or Contact could not be resolved. Close and reopen the record.",
+        severity: "error",
+      });
+      return;
+    }
+    if (String(selectedApplicationId) === String(sourceMatterId)) {
+      setSnackbar({
+        open: true,
+        message: "Select a different Matter from the current Matter.",
+        severity: "warning",
+      });
+      return;
+    }
 
     setIsMoving(true);
     try {
-
-
-      // Create a new application history in the selected application
-      const createApplicationHistory = await ZOHO.CRM.API.insertRecord({
-        Entity: "Applications_History",
-        APIData: {
-          Name: historyContacts[0].Full_Name,
-          Application: { id: selectedApplicationId },
-          History_Details: selectedRowData.details,
-          History_Result: selectedRowData.result,
-          History_Type: selectedRowData.type,
-          Regarding: selectedRowData.regarding,
-          Duration_Min: selectedRowData.duration,
-          Date: selectedRowData.date_time,
-          Stakeholder: selectedRowData.stakeHolder,
-        },
-        Trigger: ["workflow"],
+      const result = await moveApplicationHistoryToMatter({
+        ZOHO,
+        sourceId: selectedRowData.id,
+        destinationMatterId: selectedApplicationId,
+        destinationContactId: currentContact.id,
+        historySummary,
       });
-
-      if (createApplicationHistory?.data[0]?.code === "SUCCESS") {
-        const newHistoryId = createApplicationHistory.data[0].details.id;
-
-        // Create ApplicationxContacts for all associated contacts
-        for (const contact of historyContacts) {
-          await ZOHO.CRM.API.insertRecord({
-            Entity: "Application_Hstory",
-            APIData: {
-              Application_Hstory: { id: newHistoryId },
-              Contact: { id: contact.id },
-            },
-            Trigger: ["workflow"],
-          });
-        }
-
-        var func_name = "copy_attachment_form_contact_history_to_applicatio";
-        var req_data = {
-          arguments: JSON.stringify({
-            fromModule: "History1",
-            toModule: "Applications_History",
-            fromID: selectedRowData?.id,
-            ToID: newHistoryId,
-          }),
-        };
-
-        await ZOHO.CRM.FUNCTIONS.execute(func_name, req_data).then(function (data) {
-          console.log(data);
-        });
-
-        // Delete the current history and associated contacts
-        await handleDelete();
-
-        setSnackbar({
-          open: true,
-          message: "History moved successfully!",
-          severity: "success",
-        });
-      } else {
-        throw new Error("Failed to create new application history.");
-      }
-    } catch (error) {
-      console.error("Error moving history:", error);
+      setIsMoving(false);
       setSnackbar({
         open: true,
-        message: "Failed to move history.",
+        message: "History moved to the selected Matter successfully.",
+        severity: "success",
+      });
+      handleApplicationDialogClose();
+      onRecordMoved?.(result.sourceId);
+    } catch (error) {
+      console.error("Error moving history:", error);
+      setIsMoving(false);
+      setSnackbar({
+        open: true,
+        message: error?.message || "Failed to move History to the selected Matter.",
         severity: "error",
       });
-    } finally {
-      setIsMoving(false);
-      handleApplicationDialogClose();
     }
   };
 
@@ -196,7 +170,7 @@ const ApplicationDialog = ({
     <>
       <MUIDialog
         open={openApplicationDialog}
-        onClose={handleApplicationDialogClose}
+        onClose={isMoving ? undefined : handleApplicationDialogClose}
         PaperProps={{
           sx: {
             minWidth: "600px",
@@ -211,7 +185,7 @@ const ApplicationDialog = ({
             applications={applications}
             selectedApplicationId={selectedApplicationId}
             setSelectedApplicationId={setSelectedApplicationId}
-            currentContact={currentContact}
+            sourceMatterId={sourceMatterId}
           />
         </DialogContent>
         <DialogActions>
@@ -219,7 +193,7 @@ const ApplicationDialog = ({
             Cancel
           </Button>
           <Button
-            onClick={() => handleApplicationSelect(currentContact)}
+            onClick={handleApplicationSelect}
             color="primary"
             variant="contained"
             disabled={!selectedApplicationId || isMoving}
