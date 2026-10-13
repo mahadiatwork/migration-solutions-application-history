@@ -214,6 +214,24 @@ test("accepts Zoho newline normalization in a new Stakeholder History", async ()
   expect(crm.state.deleted).toBe(true);
 });
 
+test("accepts harmless imported-email whitespace normalization in a new Stakeholder History", async () => {
+  const crm = makeCrm({
+    contacts: [],
+    sourceDetails: "\uFEFFFirst line\r\n\tSecond line  \r\n",
+    targetOverride: { History_Details_Plain: "First line\n    Second line\n" },
+  });
+
+  await expect(moveApplicationHistoryToMain({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destination: "stakeholder",
+    destinationId: "stakeholder-2",
+    listAttachments: crm.listAttachments,
+    delay: async () => {},
+  })).resolves.toMatchObject({ targetId: "main-history-1" });
+  expect(crm.state.deleted).toBe(true);
+});
+
 test("retries a temporarily incomplete new History readback", async () => {
   const crm = makeCrm({ contacts: [] });
   const getRecord = crm.api.getRecord.getMockImplementation();
@@ -939,6 +957,21 @@ describe("Application History to another Matter move", () => {
       delay: async () => {},
     })).resolves.toMatchObject({ destination: "matter" });
   });
+
+test("accepts harmless imported-email whitespace normalization in preserved History details", async () => {
+  const crm = makeMatterMoveCrm({
+    sourceOverrides: { History_Details: "\uFEFFFirst line\r\n\tSecond line  \r\n" },
+    verificationOverride: { History_Details: "First line\n    Second line\n" },
+  });
+
+  await expect(moveApplicationHistoryToMatter({
+    ZOHO: crm.ZOHO,
+    sourceId: "application-history-1",
+    destinationMatterId: "matter-2",
+    destinationContactId: "contact-2",
+    delay: async () => {},
+  })).resolves.toMatchObject({ destination: "matter" });
+});
 
   test("preserves every Matter Progress value and accepts object-shaped reordered readback", async () => {
     const crm = makeMatterMoveCrm({

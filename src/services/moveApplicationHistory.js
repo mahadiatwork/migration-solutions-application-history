@@ -127,6 +127,14 @@ const normalizeZohoText = (value, { trim = false } = {}) => {
   return trim ? normalized.trim() : normalized;
 };
 
+const normalizeHistoryDetails = (value) =>
+  String(value ?? "")
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\uFEFF\u200B]/g, "")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ +(?=\n|$)/g, "");
+
 const sameDate = (expected, actual) => {
   if (!expected && !actual) return true;
   const expectedTime = Date.parse(expected);
@@ -180,8 +188,8 @@ const assertTarget = (target, payload, destination, destinationId) => {
     throw new Error("The new History record has a different owner.");
   }
   if (
-    normalizeZohoText(payload.History_Details_Plain) !==
-    normalizeZohoText(target.History_Details_Plain)
+    normalizeHistoryDetails(payload.History_Details_Plain) !==
+    normalizeHistoryDetails(target.History_Details_Plain)
   ) {
     throw new Error("The new History record is missing its details.");
   }
@@ -224,8 +232,8 @@ const assertTargetWithRetry = async (
       lastError = error;
       if (!target) continue;
       const detailsArePending =
-        normalizeZohoText(payload.History_Details_Plain) !== "" &&
-        normalizeZohoText(target.History_Details_Plain) === "";
+        normalizeHistoryDetails(payload.History_Details_Plain) !== "" &&
+        normalizeHistoryDetails(target.History_Details_Plain) === "";
       if (!detailsArePending) throw error;
     }
   }
@@ -613,8 +621,8 @@ const matterPayloadMismatches = (record, payload) => {
 
   if (Object.prototype.hasOwnProperty.call(payload, "History_Details")) {
     addMismatch(
-      normalizeZohoText(record.History_Details) ===
-        normalizeZohoText(payload.History_Details),
+      normalizeHistoryDetails(record.History_Details) ===
+        normalizeHistoryDetails(payload.History_Details),
       "History Details"
     );
   }
